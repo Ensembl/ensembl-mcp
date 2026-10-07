@@ -5,8 +5,6 @@
     - kubectl config set-context --current --namespace=${NS}
   script:
     - cd k8s/deployment-manifests
-    - sed -i "s#<NFS_SERVER>#${NFS_SERVER}#g" ./deployment.yaml
-    - sed -i "s#<NFS_PATH>#${NFS_PATH}#g" ./deployment.yaml
     - kustomize edit set image DOCKER_IMAGE=${DOCKER_IMAGE}
     - kubectl apply -k .
 
