@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ensembl-mcp"
+version = "0.1.0"
+description = "Ensembl MCP pilot: find genes by symbol and scientific species name"
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+license = "Apache-2.0"
+dependencies = [
+    "fastmcp==4.0.11",
+    "httpx==0.28.1",
+    "pydantic>=2.11,<3",
+]
+
+[project.optional-dependencies]
+test = ["pytest>=8,<10", "pytest-asyncio>=1,<2"]
+
+[project.scripts]
+ensembl-mcp = "ensembl_mcp.server:main"
+ensembl-mcp-smoke = "ensembl_mcp.smoke:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
