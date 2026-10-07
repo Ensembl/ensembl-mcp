@@ -16,7 +16,7 @@ Both inputs are required strings. Surrounding whitespace is removed and blank va
 
 The tool resolves the species' reference genome through Ensembl Core GraphQL and returns all gene matches for that genome and symbol. Callers do not need genome UUIDs or GraphQL knowledge.
 
-This is early development, not a production service. Offline unit and MCP protocol tests use mocked upstream responses. Prior manual requests established the query examples and cluster connectivity; they did **not** demonstrate this MCP implementation against the real service. Live verification requires the separate smoke command below and a reachable endpoint. No Kubernetes deployment or container packaging is included in this milestone.
+This is early development, not a production service. Offline unit and MCP protocol tests use mocked upstream responses. Prior manual requests established the query examples and cluster connectivity; they did **not** demonstrate this MCP implementation against the real service. Live verification requires the separate smoke command below and a reachable endpoint. A Dockerfile packages the local stdio server; Kubernetes deployment remains a later milestone.
 
 ## Install and run locally
 
@@ -68,6 +68,46 @@ For a client supporting `mcpServers` stdio configuration, replace the absolute p
 ```
 
 The editable install makes the module available without a client-specific working directory. Configure the MCP client's tool-call timeout separately: **90 seconds is a starting point**, as used by the smoke command, not a service guarantee. Timeout settings differ between clients and are not a portable `mcpServers` configuration field.
+
+### Docker
+
+Build the image and run the stdio server with runtime configuration:
+
+```sh
+docker build -t ensembl-mcp:0.1 .
+export ENSEMBL_CORE_GRAPHQL_URL='https://your-reachable-core-graphql-endpoint/graphql'
+docker run --rm -i \
+  -e ENSEMBL_CORE_GRAPHQL_URL \
+  -e ENSEMBL_CORE_GRAPHQL_TIMEOUT_SECONDS=30 \
+  ensembl-mcp:0.1
+```
+
+The image uses the [official Python 3.12 slim image](https://hub.docker.com/_/python), installs the package without test dependencies and runs as a non-root user. The `.dockerignore` allowlist excludes local environments, secrets, Git history and tests from the build context. The endpoint is supplied at runtime, never baked into the image.
+
+An MCP client can launch the container using this stdio configuration:
+
+```json
+{
+  "mcpServers": {
+    "ensembl": {
+      "command": "docker",
+      "args": ["run", "--rm", "-i", "-e", "ENSEMBL_CORE_GRAPHQL_URL", "ensembl-mcp:0.1"],
+      "env": {
+        "ENSEMBL_CORE_GRAPHQL_URL": "https://your-reachable-core-graphql-endpoint/graphql"
+      }
+    }
+  }
+}
+```
+
+Use `-i` to keep stdin open and omit `-t`, which would allocate a terminal and interfere with the stdio protocol. There is no HTTP listener or port to publish. The endpoint must be reachable **from inside the container**; `localhost` refers to the container itself, and the cluster-only hostname still requires an appropriate access route.
+
+To explicitly run the existing live MCP smoke command inside the image:
+
+```sh
+docker run --rm -e ENSEMBL_CORE_GRAPHQL_URL \
+  ensembl-mcp:0.1 ensembl-mcp-smoke --live
+```
 
 ## Lookup and result contract
 
@@ -128,6 +168,8 @@ FastMCP's [typed structured output and tool errors](https://gofastmcp.com/server
 
 ```text
 pyproject.toml                 Dependencies and console commands
+Dockerfile                    Non-root Python 3.12 stdio image
+.dockerignore                 Minimal package-only build context
 src/ensembl_mcp/
   config.py                   Startup configuration and HTTP timeout policy
   models.py                   Typed inputs, genome metadata and results
@@ -151,7 +193,7 @@ The pilot assesses three aspects separately: **protocol behaviour**, **service p
 
 Only symbol lookup in the dynamically resolved reference genome is included. There is no common-name resolution, fuzzy/custom alias search, caller-selected assembly/release, separate stable-ID lookup, or additional data tool. Returning upstream `alternative_symbols` does not establish alias-search behaviour. Upstream schema compatibility and current biological data require live verification.
 
-Transcripts, proteins, sequences, variants, coordinates, external references and literature retrieval are outside v0.1. So are Kubernetes resources, container packaging, deployment, public hosting, caching, retries and a broad observability stack. Deployment into `mcp-poc-public` is a later milestone.
+Transcripts, proteins, sequences, variants, coordinates, external references and literature retrieval are outside v0.1. So are Kubernetes resources, deployment, public hosting, caching, retries and a broad observability stack. Deployment into `mcp-poc-public` is a later milestone.
 
 ## Licence
 
