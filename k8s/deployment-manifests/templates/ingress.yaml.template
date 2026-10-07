@@ -1,0 +1,22 @@
+# This is a draft ingress for the MCP k8s deployment. It contains placeholder values for environment variables and configuration settings that will be used by the application.
+# This will be replaced with the actual configuration values once ready
+# Ingress for routing Track API live URL
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /$1
+  name: ensembl-mcp
+spec:
+  ingressClassName: nginx
+  rules:
+  - host: <HOST>
+    http:
+      paths:
+      - backend:
+          service:
+            name: ensembl-mcp
+            port:
+              number: 2222
+        path: /api/mcp/(.*)
+        pathType: Prefix
