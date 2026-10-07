@@ -8,8 +8,6 @@ stages:
 variables:
   DOCKER_IMAGE: ${CI_REGISTRY_IMAGE}:${CI_COMMIT_SHORT_SHA}
   DOCKER_TLS_CERTDIR: ""
-  NFS_SERVER: ${HL_NFS_SERVER_CODON}
-  NFS_PATH: ${HL_NFS_PATH_CODON}
   MCP_NS: "mcp-poc-public" # explicitlyhard-coded for POC
 
 #Build docker image
