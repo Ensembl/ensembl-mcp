@@ -3,10 +3,10 @@ import subprocess
 import sys
 
 import pytest
-from fastmcp import Client
 from fastmcp.client.transports import StdioTransport
 
-from ensembl_mcp.smoke import check_server
+from ensembl_mcp import smoke
+from ensembl_mcp.config import Settings
 
 
 def test_live_command_requires_explicit_opt_in():
@@ -21,20 +21,25 @@ def test_live_command_requires_explicit_opt_in():
     assert result.stdout == ""
 
 
-async def test_smoke_over_stdio_with_mocked_backend(tmp_path, genome, brca2):
-    # Running subprocess and the same client check used by --live, without TCP.
+async def test_smoke_over_stdio_with_mocked_backend(tmp_path, genome, brca2, monkeypatch):
+    # Exercise the smoke launcher and main entry point even in the HTTP image's env.
+    monkeypatch.setenv("MCP_TRANSPORT", "streamable-http")
     script = tmp_path / "mock_server.py"
     script.write_text(
         "import httpx\n"
-        "from ensembl_mcp.config import Settings\n"
-        "from ensembl_mcp.server import create_server\n"
+        "from ensembl_mcp import server\n"
         f"payload = {{'data': {{'genomes': [{genome!r}], 'genes': [{brca2!r}]}}}}\n"
         "transport = httpx.MockTransport(lambda request: httpx.Response(200, json=payload))\n"
-        "create_server(Settings('http://example.invalid'), transport=transport).run(transport='stdio', show_banner=False)\n"
+        "create_server = server.create_server\n"
+        "server.create_server = lambda settings: create_server(settings, transport=transport)\n"
+        "server.main()\n"
     )
-    transport = StdioTransport(sys.executable, [str(script)], keep_alive=False)
-    async with Client(transport, timeout=10) as client:
-        result = await check_server(client)
+
+    def mock_backend_transport(**kwargs):
+        return StdioTransport(**{**kwargs, "args": [str(script)]})
+
+    monkeypatch.setattr(smoke, "StdioTransport", mock_backend_transport)
+    result = await smoke.run_live(Settings("http://example.invalid"), client_timeout=10)
     assert result.genome.genome_id == genome["genome_id"]
     assert result.genes[0].model_dump() == brca2
 

@@ -3,7 +3,9 @@ FROM python:3.12-slim-bookworm
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
-    PIP_DISABLE_PIP_VERSION_CHECK=1
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    MCP_TRANSPORT=streamable-http \
+    MCP_PORT=8000
 
 WORKDIR /app
 
@@ -15,5 +17,6 @@ RUN python -m pip install . \
 
 USER ensembl
 
-# MCP uses stdin/stdout; no listening port is needed.
+# Default Streamable HTTP port; override MCP_PORT and the port mapping together.
+EXPOSE 8000
 CMD ["ensembl-mcp"]

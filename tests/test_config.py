@@ -32,6 +32,8 @@ def test_invalid_timeout(timeout):
 def test_configuration_defaults_and_overrides():
     config = Settings.from_env({"ENSEMBL_CORE_GRAPHQL_URL": " https://example.invalid/graphql "})
     assert config.endpoint == "https://example.invalid/graphql"
+    assert config.mcp_transport == "stdio"
+    assert config.mcp_port == 8000
     assert config.http_timeout.connect == 5
     assert config.http_timeout.read == 30
     assert config.http_timeout.write == 30
@@ -42,6 +44,29 @@ def test_configuration_defaults_and_overrides():
     })
     assert custom.http_timeout.read == custom.http_timeout.write == custom.http_timeout.pool == 45.5
     assert custom.http_timeout.connect == 5
+
+
+@pytest.mark.parametrize("port", ["", "abc", "0", "-1", "65536", "8000.5", "inf"])
+def test_invalid_mcp_port(port):
+    with pytest.raises(ConfigurationError, match="MCP_PORT"):
+        Settings.from_env({"ENSEMBL_CORE_GRAPHQL_URL": "http://example.invalid", "MCP_PORT": port})
+
+
+@pytest.mark.parametrize("transport", ["", "http", "sse", "unknown"])
+def test_invalid_mcp_transport(transport):
+    with pytest.raises(ConfigurationError, match="MCP_TRANSPORT"):
+        Settings.from_env({
+            "ENSEMBL_CORE_GRAPHQL_URL": "http://example.invalid", "MCP_TRANSPORT": transport,
+        })
+
+
+def test_http_configuration():
+    settings = Settings.from_env({
+        "ENSEMBL_CORE_GRAPHQL_URL": "http://example.invalid",
+        "MCP_TRANSPORT": "streamable-http", "MCP_PORT": "8080",
+    })
+    assert settings.mcp_transport == "streamable-http"
+    assert settings.mcp_port == 8080
 
 
 def test_startup_configuration_error_is_stderr_only():

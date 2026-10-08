@@ -6,7 +6,7 @@ This pilot supports the development and evaluation of the [EMBL-EBI MCP guidelin
 
 ## Status and purpose
 
-Version 0.1 implements one local proof-of-concept tool using Python and the `fastmcp` package:
+Version 0.1 implements one proof-of-concept tool using Python and the `fastmcp` package:
 
 ```text
 find_gene(symbol="BRCA2", species="Homo sapiens")
@@ -16,7 +16,7 @@ Both inputs are required strings. Surrounding whitespace is removed and blank va
 
 The tool resolves the species' reference genome through Ensembl Core GraphQL and returns all gene matches for that genome and symbol. Callers do not need genome UUIDs or GraphQL knowledge.
 
-This is early development, not a production service. Offline unit and MCP protocol tests use mocked upstream responses. Prior manual requests established the query examples and cluster connectivity; they did **not** demonstrate this MCP implementation against the real service. Live verification requires the separate smoke command below and a reachable endpoint. A Dockerfile packages the local stdio server; Kubernetes deployment remains a later milestone.
+This is early development, not a production service. Offline unit and MCP protocol tests use mocked upstream responses. Prior manual requests established the query examples and cluster connectivity; they did **not** demonstrate this MCP implementation against the real service. Live verification requires the separate smoke command below and a reachable endpoint. The initial image has been deployed to the development cluster in `mcp-poc-public`, as reported by the deployment team. The application now supports Streamable HTTP for that environment; this transport update still needs image build and cluster verification. Kubernetes manifests are not changed here.
 
 ## Install and run locally
 
@@ -26,15 +26,25 @@ The supported runtime for v0.1 is **Python 3.12** with **FastMCP 4.0.11**, pinne
 python3.12 -m venv .venv
 .venv/bin/python -m pip install -e '.[test]'
 export ENSEMBL_CORE_GRAPHQL_URL='https://your-reachable-core-graphql-endpoint/graphql'
-.venv/bin/ensembl-mcp
+MCP_TRANSPORT=stdio .venv/bin/ensembl-mcp
 ```
 
-Replace the example URL with your actual Core GraphQL endpoint. The server runs over **stdio** and waits for MCP messages; an MCP client normally starts the process itself. The equivalent module entry point is `.venv/bin/python -m ensembl_mcp.server`. Configuration is read from the process environment; `.env` files are not automatically loaded.
+Replace the example URL with your actual Core GraphQL endpoint. Local execution defaults to **stdio** and waits for MCP messages; an MCP client normally starts the process itself. The equivalent module entry point is `.venv/bin/python -m ensembl_mcp.server`. Configuration is read from the process environment; `.env` files are not automatically loaded.
+
+To run the HTTP server locally with the same transport as the container:
+
+```sh
+MCP_TRANSPORT=streamable-http MCP_PORT=8000 .venv/bin/ensembl-mcp
+```
+
+This listens on **`0.0.0.0:8000`** and exposes **`/mcp`**. Connect locally using `http://localhost:8000/mcp`. The existing FastMCP package and its MCP Python SDK implement [Streamable HTTP](https://gofastmcp.com/deployment/running-server#http-transport-streamable); this is not the legacy SSE transport. HTTP requests are stateless, so they do not require a pod-specific MCP session. The server supports `initialize`, `notifications/initialized`, `tools/list` and `tools/call` through this endpoint, including SDK-managed response streaming.
 
 ### Configuration
 
 | Variable | Requirement and default |
 | --- | --- |
+| `MCP_TRANSPORT` | `stdio` or `streamable-http` only. Defaults to `stdio` when unset locally; the Docker image sets `streamable-http`. Surrounding whitespace is trimmed. |
+| `MCP_PORT` | Integer from `1` to `65535`, default `8000`. Validated at startup; used only for HTTP. The HTTP bind address is fixed at `0.0.0.0` and the endpoint path at `/mcp`. |
 | `ENSEMBL_CORE_GRAPHQL_URL` | Required absolute `http://` or `https://` URL with a host. Surrounding whitespace is trimmed. Credentials in the URL, fragments, internal whitespace and invalid ports are rejected. There is no runtime default or fallback. |
 | `ENSEMBL_CORE_GRAPHQL_TIMEOUT_SECONDS` | Optional finite positive number, default `30`. Used for HTTPX read, write and connection-pool timeouts. Connection timeout is separately fixed at `5` seconds. |
 
@@ -50,7 +60,21 @@ That ClusterIP service is in `ensembl-dev`; connectivity from a pod in `mcp-poc-
 
 ### MCP client connection
 
-For a client supporting `mcpServers` stdio configuration, replace the absolute path and endpoint:
+For a client supporting Streamable HTTP via `mcpServers`, point it at the running server:
+
+```json
+{
+  "mcpServers": {
+    "ensembl": {
+      "url": "http://localhost:8000/mcp"
+    }
+  }
+}
+```
+
+Replace `localhost:8000` with the reachable development service address for a remote client. The application's `/mcp` endpoint does not itself create Kubernetes Service or ingress access.
+
+For local stdio, replace the absolute path and endpoint in this configuration:
 
 ```json
 {
@@ -59,6 +83,7 @@ For a client supporting `mcpServers` stdio configuration, replace the absolute p
       "command": "/absolute/path/to/ensembl-mcp/.venv/bin/python",
       "args": ["-m", "ensembl_mcp.server"],
       "env": {
+        "MCP_TRANSPORT": "stdio",
         "ENSEMBL_CORE_GRAPHQL_URL": "https://your-reachable-core-graphql-endpoint/graphql",
         "ENSEMBL_CORE_GRAPHQL_TIMEOUT_SECONDS": "30"
       }
@@ -71,42 +96,60 @@ The editable install makes the module available without a client-specific workin
 
 ### Docker
 
-Build the image and run the stdio server with runtime configuration:
+Build the image and run the HTTP server with runtime configuration:
 
 ```sh
 docker build -t ensembl-mcp:0.1 .
 export ENSEMBL_CORE_GRAPHQL_URL='https://your-reachable-core-graphql-endpoint/graphql'
-docker run --rm -i \
+docker run --rm -p 8000:8000 \
   -e ENSEMBL_CORE_GRAPHQL_URL \
-  -e ENSEMBL_CORE_GRAPHQL_TIMEOUT_SECONDS=30 \
   ensembl-mcp:0.1
 ```
 
-The image uses the [official Python 3.12 slim image](https://hub.docker.com/_/python), installs the package without test dependencies and runs as a non-root user. The `.dockerignore` allowlist excludes local environments, secrets, Git history and tests from the build context. The endpoint is supplied at runtime, never baked into the image.
+The image sets `MCP_TRANSPORT=streamable-http` and `MCP_PORT=8000`. Clients connect to `http://localhost:8000/mcp` using the HTTP configuration above. To change the listening port, change both the environment variable and published container port:
 
-An MCP client can launch the container using this stdio configuration:
-
-```json
-{
-  "mcpServers": {
-    "ensembl": {
-      "command": "docker",
-      "args": ["run", "--rm", "-i", "-e", "ENSEMBL_CORE_GRAPHQL_URL", "ensembl-mcp:0.1"],
-      "env": {
-        "ENSEMBL_CORE_GRAPHQL_URL": "https://your-reachable-core-graphql-endpoint/graphql"
-      }
-    }
-  }
-}
+```sh
+docker run --rm -p 8080:8080 \
+  -e MCP_PORT=8080 -e ENSEMBL_CORE_GRAPHQL_URL \
+  ensembl-mcp:0.1
 ```
 
-Use `-i` to keep stdin open and omit `-t`, which would allocate a terminal and interfere with the stdio protocol. There is no HTTP listener or port to publish. The endpoint must be reachable **from inside the container**; `localhost` refers to the container itself, and the cluster-only hostname still requires an appropriate access route.
+The image uses the [official Python 3.12 slim image](https://hub.docker.com/_/python), installs the package without test dependencies and runs as a non-root user. The `.dockerignore` allowlist excludes local environments, secrets, Git history and tests from the build context. The endpoint is supplied at runtime, never baked into the image. `EXPOSE 8000` documents the default port; it does not publish the port or configure Kubernetes networking.
+
+To explicitly use stdio in the container instead:
+
+```sh
+docker run --rm -i -e MCP_TRANSPORT=stdio \
+  -e ENSEMBL_CORE_GRAPHQL_URL ensembl-mcp:0.1
+```
+
+For stdio, use `-i` to keep stdin open and omit `-t`. HTTP mode does not need either option. The GraphQL endpoint must be reachable **from inside the container**; `localhost` refers to the container itself, and the cluster-only hostname still requires an appropriate access route.
 
 To explicitly run the existing live MCP smoke command inside the image:
 
 ```sh
 docker run --rm -e ENSEMBL_CORE_GRAPHQL_URL \
   ensembl-mcp:0.1 ensembl-mcp-smoke --live
+```
+
+This smoke command always starts its own **stdio** subprocess, overriding the image's HTTP default. It verifies the live lookup but does not test a running HTTP listener. To check the running HTTP server through an MCP client, run this separately from the installed local environment (it makes a real upstream lookup):
+
+```sh
+.venv/bin/python - <<'PYTHON'
+import asyncio
+from fastmcp import Client
+
+async def check():
+    async with Client("http://localhost:8000/mcp", timeout=90) as client:
+        # Connecting performs MCP initialisation.
+        print(await client.list_tools())
+        result = await client.call_tool(
+            "find_gene", {"symbol": "BRCA2", "species": "Homo sapiens"}
+        )
+        print(result.structured_content)
+
+asyncio.run(check())
+PYTHON
 ```
 
 ## Lookup and result contract
@@ -141,7 +184,7 @@ Default offline suite (no Kubernetes access or live requests):
 .venv/bin/python -m pytest -q
 ```
 
-The suite covers dynamic reference selection, historical and synthetic fixtures, multiple/nullable gene matches, input validation, GraphQL variables, configuration, upstream failure handling, sanitised errors, request logs and lifecycle cleanup. Protocol tests discover and invoke the tool through FastMCP; a subprocess test also checks stdio with a mocked HTTP backend. Tests block accidental TCP connections in the test process.
+The suite covers dynamic reference selection, historical and synthetic fixtures, multiple/nullable gene matches, input validation, GraphQL variables, configuration, upstream failure handling, sanitised errors, request logs and lifecycle cleanup. Protocol tests discover and invoke the tool through FastMCP; a subprocess test also checks stdio with a mocked HTTP backend. HTTP tests send MCP initialise, initialised notification, tool discovery and tool invocation requests through the SDK ASGI application at `/mcp`, checking structured successes, no-match results, sanitised failures and lifecycle cleanup. A FastMCP client also exercises the HTTP transport against that ASGI app. The tests check startup transport, host and port selection as well. These HTTP tests run without opening network sockets; they do not verify a deployed listener or Kubernetes routing. Tests block accidental TCP connections in the test process.
 
 The **separate, explicitly enabled live smoke check** starts a local stdio server subprocess, connects through a FastMCP client, discovers `find_gene` and invokes the exact BRCA2 example against the configured real endpoint:
 
@@ -168,14 +211,14 @@ FastMCP's [typed structured output and tool errors](https://gofastmcp.com/server
 
 ```text
 pyproject.toml                 Dependencies and console commands
-Dockerfile                    Non-root Python 3.12 stdio image
+Dockerfile                    Non-root Python 3.12 image; HTTP by default
 .dockerignore                 Minimal package-only build context
 src/ensembl_mcp/
   config.py                   Startup configuration and HTTP timeout policy
   models.py                   Typed inputs, genome metadata and results
   graphql.py                  Async HTTP/GraphQL handling and safe errors
   lookup.py                   Queries, reference selection and lookup service
-  server.py                   FastMCP registration, lifecycle and stdio entry point
+  server.py                   FastMCP registration, lifecycle and transport entry point
   smoke.py                    Explicit live MCP smoke command
 tests/                        Offline unit and protocol tests
 ```
@@ -193,7 +236,7 @@ The pilot assesses three aspects separately: **protocol behaviour**, **service p
 
 Only symbol lookup in the dynamically resolved reference genome is included. There is no common-name resolution, fuzzy/custom alias search, caller-selected assembly/release, separate stable-ID lookup, or additional data tool. Returning upstream `alternative_symbols` does not establish alias-search behaviour. Upstream schema compatibility and current biological data require live verification.
 
-Transcripts, proteins, sequences, variants, coordinates, external references and literature retrieval are outside v0.1. So are Kubernetes resources, deployment, public hosting, caching, retries and a broad observability stack. Deployment into `mcp-poc-public` is a later milestone.
+Transcripts, proteins, sequences, variants, coordinates, external references and literature retrieval are outside v0.1. So are Kubernetes resources, deployment, public hosting, caching, retries and a broad observability stack. The reported development deployment is in `mcp-poc-public`; image rollout and verification of this HTTP update are separate from the application changes here.
 
 ## Licence
 

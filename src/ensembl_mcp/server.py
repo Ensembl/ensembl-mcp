@@ -1,4 +1,4 @@
-"""FastMCP registration and stdio entry point."""
+"""FastMCP registration and configurable stdio/Streamable HTTP entry point."""
 
 import logging
 import sys
@@ -69,7 +69,14 @@ def main() -> None:
     except ConfigurationError as exc:
         logger.error("Configuration error: %s", exc)
         raise SystemExit(2) from None
-    create_server(settings).run(transport="stdio", show_banner=False)
+    server = create_server(settings)
+    if settings.mcp_transport == "streamable-http":
+        server.run(
+            transport="streamable-http", host="0.0.0.0", port=settings.mcp_port,
+            path="/mcp", stateless_http=True, show_banner=False,
+        )
+    else:
+        server.run(transport="stdio", show_banner=False)
 
 
 if __name__ == "__main__":
