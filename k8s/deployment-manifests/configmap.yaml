@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ensembl-mcp-configmap
+data:
+  ENSEMBL_CORE_GRAPHQL_URL: "http://graphql-core-svc.ensembl-dev:8000"
+  ENSEMBL_CORE_GRAPHQL_TIMEOUT_SECONDS: "30"

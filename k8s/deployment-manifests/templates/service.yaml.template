@@ -1,0 +1,18 @@
+# This is a draft service for the MCP k8s deployment. It contains placeholder values for environment variables and configuration settings that will be used by the application.
+# This will be replaced with the actual configuration values once ready
+# Kubernetes service for exposing incoming port for MCP app pods
+apiVersion: v1
+kind: Service
+metadata:
+  name: ensembl-mcp-svc
+  labels:
+    app: ensembl-mcp-svc
+spec:
+  selector:
+    app: ensembl-mcp
+  type: ClusterIP
+  ports:
+    - name: mcp
+      port: 2222
+      protocol: TCP
+      targetPort: 2222

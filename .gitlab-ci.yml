@@ -1,0 +1,34 @@
+# include template to setup review app
+include: '/gitlab-ci-templates/.deploy-template.yml'
+
+stages:
+  - build
+  - deploy
+
+variables:
+  DOCKER_IMAGE: ${CI_REGISTRY_IMAGE}:${CI_COMMIT_SHORT_SHA}
+  DOCKER_TLS_CERTDIR: ""
+  MCP_NS: "mcp-poc-public" # explicitlyhard-coded for POC
+
+#Build docker image
+Docker:
+  stage: build
+  image: docker
+  services:
+    - docker:dind
+  before_script:
+    - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
+  script:
+    - docker build -t ${DOCKER_IMAGE} --no-cache -f Dockerfile .
+    - docker push ${DOCKER_IMAGE}
+    - docker rmi ${DOCKER_IMAGE}
+    - docker logout $CI_REGISTRY
+
+Dev:
+  stage: deploy
+  extends: .deploy-main
+  environment:
+    name: development
+  variables:
+    AGENT: ${DEV_AGENT}
+    NS: ${MCP_NS}
