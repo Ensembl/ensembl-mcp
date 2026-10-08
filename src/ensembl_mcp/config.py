@@ -17,8 +17,14 @@ class ConfigurationError(ValueError):
 class Settings:
     endpoint: str
     timeout_seconds: float = 30.0
+    mcp_transport: str = "stdio"
+    mcp_port: int = 8000
 
     def __post_init__(self) -> None:
+        if self.mcp_transport not in {"stdio", "streamable-http"}:
+            raise ConfigurationError("MCP_TRANSPORT must be stdio or streamable-http.")
+        if type(self.mcp_port) is not int or not 1 <= self.mcp_port <= 65535:
+            raise ConfigurationError("MCP_PORT must be an integer between 1 and 65535.")
         try:
             url = urlsplit(self.endpoint)
             valid = (
@@ -55,7 +61,15 @@ class Settings:
             raise ConfigurationError(
                 "ENSEMBL_CORE_GRAPHQL_TIMEOUT_SECONDS must be a finite positive number."
             ) from None
-        return cls(endpoint, timeout)
+        try:
+            port = int(env.get("MCP_PORT", "8000"))
+        except ValueError:
+            raise ConfigurationError("MCP_PORT must be an integer between 1 and 65535.") from None
+        return cls(
+            endpoint, timeout,
+            mcp_transport=env.get("MCP_TRANSPORT", "stdio").strip(),
+            mcp_port=port,
+        )
 
     @property
     def http_timeout(self) -> httpx.Timeout:

@@ -37,6 +37,8 @@ async def run_live(settings: Settings, client_timeout: float) -> FindGeneResult:
         command=sys.executable,
         args=["-m", "ensembl_mcp.server"],
         env={
+            # This check owns a stdio subprocess, including when run in the HTTP image.
+            "MCP_TRANSPORT": "stdio",
             "ENSEMBL_CORE_GRAPHQL_URL": settings.endpoint,
             "ENSEMBL_CORE_GRAPHQL_TIMEOUT_SECONDS": str(settings.timeout_seconds),
         },
