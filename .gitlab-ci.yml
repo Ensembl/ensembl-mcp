@@ -1,5 +1,5 @@
 # include template to setup review app
-include: '/gitlab-ci-templates/.deploy-template.yaml'
+include: '/gitlab-ci-templates/.deploy-template.yml'
 
 stages:
   - build
