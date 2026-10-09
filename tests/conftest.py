@@ -26,7 +26,7 @@ def genome():
         "genome_id": "cf06c737-7528-4f21-9a01-07aa29f6ffab",
         "scientific_name": "Homo sapiens",
         "assembly_accession": "GCA_000001405.29",
-        "release_number": 115,
+        "release_number": 2.0,
         "is_reference": True,
     }
 

@@ -170,7 +170,7 @@ FastMCP publishes input and output schemas. A successful MCP response contains a
 | `genes` | Every upstream match, in upstream order, with `stable_id`, `symbol`, `name`, `so_term`, `transcript_count`, `alternative_symbols` |
 | `outcome` | `found` when the list is non-empty; `not_found` for an empty list |
 
-Versioned stable IDs are preserved. Nullable biological values, including `symbol` and `name`, remain `null`; missing fields are errors, not fabricated defaults. Genome assembly accession and release number may also be null. Result models validate scalar/list types without coercing strings into numbers or booleans. No internal endpoint is included in successful results.
+Versioned stable IDs are preserved. Nullable biological values, including `symbol` and `name`, remain `null`; missing fields are errors, not fabricated defaults. Genome assembly accession and release number may also be null. `release_number` follows the upstream GraphQL `Float` type: the MCP schema permits a number or null, and values such as `2.0` and `2.5` are preserved without integer truncation. `transcript_count` retains its integer type. Result models validate scalar/list types without coercing strings into numbers or booleans. No internal endpoint is included in successful results.
 
 `genes: []` is a normal `not_found` result with selected genome context. Species-resolution failures and upstream failures are MCP tool errors, not biological no-match results. Safe error categories distinguish `input_validation`, `species_not_found`, `no_reference_genome`, `ambiguous_reference_genome`, `upstream_graphql`, `upstream_http`, `upstream_connection`, `upstream_timeout` and `upstream_response`. Missing or wrongly typed tool arguments are rejected by FastMCP's input validation.
 

@@ -24,7 +24,7 @@ class Genome(UpstreamModel):
     genome_id: Annotated[str, StringConstraints(min_length=1)]
     scientific_name: Annotated[str, StringConstraints(min_length=1)]
     assembly_accession: str | None
-    release_number: int | None
+    release_number: float | None  # Upstream GraphQL Float; do not truncate releases.
     is_reference: bool
 
 
