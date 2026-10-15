@@ -36,7 +36,7 @@ async def test_float_release_survives_lookup_and_mcp_output(brca2, release_numbe
         return httpx.Response(200, json={"data": {"genes": [brca2]}})
 
     server = create_server(
-        Settings("http://example.invalid"), transport=httpx.MockTransport(handler),
+        Settings("http://example.invalid", search_url="https://search.invalid/genomes/v3"), transport=httpx.MockTransport(handler),
     )
     async with Client(server) as client:
         result = await client.call_tool("find_gene", {
