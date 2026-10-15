@@ -6,15 +6,19 @@ This pilot supports the development and evaluation of the [EMBL-EBI MCP guidelin
 
 ## Status and purpose
 
-Version 0.1 implements one proof-of-concept tool using Python and the `fastmcp` package:
+The pilot exposes four read-only tools using Python and the `fastmcp` package:
 
 ```text
+find_genomes(query="human", reference_only=True)
 find_gene(symbol="BRCA2", species="Homo sapiens")
+find_gene(symbol="BRCA2", genome_id="<UUID returned by find_genomes>")
+explain_genome(id_or_accession="GCA_000001405.29")
+get_genome_download_links(genome_id="<selected genome UUID>")
 ```
 
-Both inputs are required strings. Surrounding whitespace is removed and blank values are rejected before any upstream request. Symbol case is preserved. Supply a scientific species name; common-name translation and fuzzy matching are not supported.
+For `find_gene`, `symbol` is required, along with either `species` or `genome_id`. Surrounding whitespace is removed and blank values are rejected before any upstream request. Symbol case is preserved. `species` must be a scientific name. A supplied genome UUID skips species resolution and permits non-reference genomes. If both selectors are supplied, the scientific name must match the UUID’s genome (case-insensitively).
 
-The tool resolves the species' reference genome through Ensembl Core GraphQL and returns all gene matches for that genome and symbol. Callers do not need genome UUIDs or GraphQL knowledge.
+Without a UUID, `find_gene` resolves the species reference genome through Ensembl Core GraphQL. With a UUID, it fetches that genome’s context directly and uses exactly that UUID for the gene query. Both paths return all symbol matches. No tool automatically substitutes a newer genome UUID.
 
 This is early development, not a production service. Offline unit and MCP protocol tests use mocked upstream responses. Prior manual requests established the query examples and cluster connectivity; they did **not** demonstrate this MCP implementation against the real service. Live verification requires the separate smoke command below and a reachable endpoint. The initial image has been deployed to the development cluster in `mcp-poc-public`, as reported by the deployment team. The application now supports Streamable HTTP for that environment; this transport update still needs image build and cluster verification. Kubernetes manifests are not changed here.
 
@@ -26,6 +30,7 @@ The supported runtime for v0.1 is **Python 3.12** with **FastMCP 4.0.11**, pinne
 python3.12 -m venv .venv
 .venv/bin/python -m pip install -e '.[test]'
 export ENSEMBL_CORE_GRAPHQL_URL='https://your-reachable-core-graphql-endpoint/graphql'
+export ENSEMBL_GENOME_SEARCH_URL='https://your-reachable-genome-search-endpoint/api/search/genomes/v3'
 MCP_TRANSPORT=stdio .venv/bin/ensembl-mcp
 ```
 
@@ -45,15 +50,18 @@ This listens on **`0.0.0.0:8000`** and exposes **`/mcp`**. Connect locally using
 | --- | --- |
 | `MCP_TRANSPORT` | `stdio` or `streamable-http` only. Defaults to `stdio` when unset locally; the Docker image sets `streamable-http`. Surrounding whitespace is trimmed. |
 | `MCP_PORT` | Integer from `1` to `65535`, default `8000`. Validated at startup; used only for HTTP. The HTTP bind address is fixed at `0.0.0.0` and the endpoint path at `/mcp`. |
+| `ENSEMBL_GENOME_SEARCH_URL` | Required full Search Hub search URL. No default or fallback. Missing, blank, or invalid values stop startup. |
+| `ENSEMBL_METADATA_API_URL` | Metadata API base URL, including its API prefix (for example `https://your-host/api/metadata`). No default; metadata tools report a configuration error when omitted. |
 | `ENSEMBL_CORE_GRAPHQL_URL` | Required absolute `http://` or `https://` URL with a host. Surrounding whitespace is trimmed. Credentials in the URL, fragments, internal whitespace and invalid ports are rejected. There is no runtime default or fallback. |
 | `ENSEMBL_CORE_GRAPHQL_TIMEOUT_SECONDS` | Optional finite positive number, default `30`. Used for HTTPX read, write and connection-pool timeouts. Connection timeout is separately fixed at `5` seconds. |
 
-Missing or invalid configuration stops startup with an error on stderr and exit status 2. Keep credentials and deployment secrets outside the repository.
+Invalid configured URLs or missing required Core or Search Hub configuration stop startup with an error on stderr and exit status 2. Search and metadata URL overrides must not contain credentials, query strings, fragments, or whitespace. All upstream clients share the configured HTTP timeout. Configure all three services against compatible environments/releases; a public Search Hub endpoint may not match development Thoas data. Keep credentials and deployment secrets outside the repository.
 
 The historically tested **cluster-only** configuration is:
 
 ```sh
 export ENSEMBL_CORE_GRAPHQL_URL='http://graphql-core-svc.ensembl-dev:8000'
+export ENSEMBL_GENOME_SEARCH_URL='http://metadata-api-svc.ensembl-dev:8014'
 ```
 
 That ClusterIP service is in `ensembl-dev`; connectivity from a pod in `mcp-poc-public` was previously reported as successful. This hostname is not a public endpoint. Running locally requires a reachable endpoint or an existing approved access route. The server is not deployed by these instructions.
@@ -85,6 +93,7 @@ For local stdio, replace the absolute path and endpoint in this configuration:
       "env": {
         "MCP_TRANSPORT": "stdio",
         "ENSEMBL_CORE_GRAPHQL_URL": "https://your-reachable-core-graphql-endpoint/graphql",
+        "ENSEMBL_GENOME_SEARCH_URL": "https://your-reachable-genome-search-endpoint/api/search/genomes/v3",
         "ENSEMBL_CORE_GRAPHQL_TIMEOUT_SECONDS": "30"
       }
     }
@@ -101,8 +110,9 @@ Build the image and run the HTTP server with runtime configuration:
 ```sh
 docker build -t ensembl-mcp:0.1 .
 export ENSEMBL_CORE_GRAPHQL_URL='https://your-reachable-core-graphql-endpoint/graphql'
+export ENSEMBL_GENOME_SEARCH_URL='https://your-reachable-genome-search-endpoint/api/search/genomes/v3'
 docker run --rm -p 8000:8000 \
-  -e ENSEMBL_CORE_GRAPHQL_URL \
+  -e ENSEMBL_GENOME_SEARCH_URL -e ENSEMBL_CORE_GRAPHQL_URL \
   ensembl-mcp:0.1
 ```
 
@@ -110,7 +120,7 @@ The image sets `MCP_TRANSPORT=streamable-http` and `MCP_PORT=8000`. Clients conn
 
 ```sh
 docker run --rm -p 8080:8080 \
-  -e MCP_PORT=8080 -e ENSEMBL_CORE_GRAPHQL_URL \
+  -e MCP_PORT=8080 -e ENSEMBL_GENOME_SEARCH_URL -e ENSEMBL_CORE_GRAPHQL_URL \
   ensembl-mcp:0.1
 ```
 
@@ -120,7 +130,7 @@ To explicitly use stdio in the container instead:
 
 ```sh
 docker run --rm -i -e MCP_TRANSPORT=stdio \
-  -e ENSEMBL_CORE_GRAPHQL_URL ensembl-mcp:0.1
+  -e ENSEMBL_GENOME_SEARCH_URL -e ENSEMBL_CORE_GRAPHQL_URL ensembl-mcp:0.1
 ```
 
 For stdio, use `-i` to keep stdin open and omit `-t`. HTTP mode does not need either option. The GraphQL endpoint must be reachable **from inside the container**; `localhost` refers to the container itself, and the cluster-only hostname still requires an appropriate access route.
@@ -128,7 +138,7 @@ For stdio, use `-i` to keep stdin open and omit `-t`. HTTP mode does not need ei
 To explicitly run the existing live MCP smoke command inside the image:
 
 ```sh
-docker run --rm -e ENSEMBL_CORE_GRAPHQL_URL \
+docker run --rm -e ENSEMBL_GENOME_SEARCH_URL -e ENSEMBL_CORE_GRAPHQL_URL \
   ensembl-mcp:0.1 ensembl-mcp-smoke --live
 ```
 
@@ -154,18 +164,18 @@ PYTHON
 
 ## Lookup and result contract
 
-Two sequential HTTP POST requests use JSON bodies, `Content-Type: application/json` and GraphQL variables:
+When resolving by species, two sequential HTTP POST requests use JSON bodies, `Content-Type: application/json` and GraphQL variables:
 
 1. `genomes(by_keyword: $by_keyword)` with `GenomeBySpecificKeywordInput`, containing the supplied `scientific_name`.
 2. `genes(by_symbol: $by_symbol)` with `SymbolInput`, containing the supplied symbol and dynamically resolved `genome_id`.
 
-Genome selection is explicit: no entries is a species-resolution error; entries with no reference assembly is a no-reference error; more than one reference is an ambiguity error. Only exactly one `is_reference: true` entry permits the gene request. No release-selection rule or historical UUID fallback is used.
+Genome selection is explicit: no entries is a species-resolution error; entries with no reference assembly is a no-reference error; more than one reference is an ambiguity error. In the species path, only exactly one `is_reference: true` entry permits the gene request. With `genome_id`, the first request instead uses `genome(by_genome_id: ...)` to retrieve context and verify the UUID, followed by the gene request. A UUID may select a non-reference genome. No release-selection rule or historical UUID fallback is used.
 
 FastMCP publishes input and output schemas. A successful MCP response contains a structured result with:
 
 | Field | Contents |
 | --- | --- |
-| `symbol`, `species` | Trimmed caller inputs |
+| `symbol`, `species` | Trimmed caller inputs; `species` is null when omitted in the UUID path |
 | `genome` | Selected `genome_id`, `scientific_name`, `assembly_accession`, `release_number`, `is_reference` |
 | `genes` | Every upstream match, in upstream order, with `stable_id`, `symbol`, `name`, `so_term`, `transcript_count`, `alternative_symbols` |
 | `outcome` | `found` when the list is non-empty; `not_found` for an empty list |
@@ -175,6 +185,24 @@ Versioned stable IDs are preserved. Nullable biological values, including `symbo
 `genes: []` is a normal `not_found` result with selected genome context. Species-resolution failures and upstream failures are MCP tool errors, not biological no-match results. Safe error categories distinguish `input_validation`, `species_not_found`, `no_reference_genome`, `ambiguous_reference_genome`, `upstream_graphql`, `upstream_http`, `upstream_connection`, `upstream_timeout` and `upstream_response`. Missing or wrongly typed tool arguments are rejected by FastMCP's input validation.
 
 GraphQL errors fail the operation even with HTTP 200 or partial data. HTTP failures (including redirects), connection/DNS failures, timeouts, malformed JSON, missing/null lists and invalid response fields cannot become empty biological results. Caller-facing errors omit raw upstream bodies and stack traces.
+
+## Genome discovery and metadata contracts
+
+`find_genomes` accepts exactly one of `query` or `species_taxonomy_id`. The latter is an exact **species** taxonomy ID, supplied as a positive decimal string; it is not a descendant-clade search or a strain-level `taxonomy_id` filter. Free text supports species/common names and assembly accessions/names according to Search Hub semantics. Search can match multiple species; ranked results do not constitute unique genome resolution.
+
+Inputs also include `reference_only=False`, `page=1`, `per_page=20` (maximum 100), and optional Search Hub `release` label. With no release, upstream includes current genomes and partial releases according to its policy. Search Hub currently returns the genome’s first-release label/type in its `release` field; this is not necessarily the requested/effective release. This label is not a Thoas numeric release version.
+
+Results contain `meta` (`total_hits`, `page`, `per_page`), `matches`, `reference_only`, and `next_page` (null at the end). Each match contains the UUID, names, species and organism taxonomy IDs, assembly, reference status, release, annotation provider/method, and coding-gene count. Optional genome tags and strain/type metadata are preserved when present.
+
+Reference filtering happens across the complete upstream candidate set, preserving upstream order and retaining multiple references. Totals, pagination, and `next_page` then refer to reference matches only. This requires scanning search pages, so broad searches can make many upstream calls. Searches exceeding 10000 candidates fail with `search_too_broad`; narrow them using the exact species selector or a more specific query. Changed totals, duplicate genomes, malformed records, and inconsistent pages fail rather than producing misleading partial results. The index does not provide snapshot isolation: a change that preserves the total and introduces no duplicates may not be detected.
+
+`explain_genome(id_or_accession)` calls `/genome/{id_or_accession}/explain`. It returns the requested identifier, the resolved genome (including suppression details), and a separate `newer_genome` only if upstream reports a different, non-suppressed genome. `newer_genome_status` is `available`, `suppressed`, or `not_reported`. Absence of a reported replacement is not proof that none exists. UUID inputs must be preserved exactly; accession inputs resolve according to the metadata API’s public accession mapping. `/genomeid` is not exposed.
+
+`get_genome_download_links(genome_id)` calls `/genome/{UUID}/explain` followed by `/genome/{UUID}/ftplinks`, always for the original UUID. It returns `links` containing `dataset` and `url`, plus separately reported newer-genome information. A failure of either metadata request fails the tool; it never becomes an empty successful result. An upstream empty links list is preserved.
+
+**Release selection is deliberately not applied to download links**, as the upstream API does not support it. The result includes `release_selection="not_applied"` and an explicit notice; it makes no latest-integrated guarantee. There is no release argument to silently ignore. The tool returns authoritative metadata links and does not browse directories, build paths, download files, or follow newer UUIDs automatically.
+
+All tools publish typed output schemas and read-only annotations. HTTP failures, timeouts, redirects, invalid JSON, and malformed result fields produce sanitised MCP tool errors. New metadata tools require `ENSEMBL_METADATA_API_URL`; existing species/gene queries continue to work without it.
 
 ## Tests
 
@@ -190,6 +218,7 @@ The **separate, explicitly enabled live smoke check** starts a local stdio serve
 
 ```sh
 export ENSEMBL_CORE_GRAPHQL_URL='https://your-reachable-core-graphql-endpoint/graphql'
+export ENSEMBL_GENOME_SEARCH_URL='https://your-reachable-genome-search-endpoint/api/search/genomes/v3'
 .venv/bin/ensembl-mcp-smoke --live
 # Optional longer MCP request timeout:
 .venv/bin/ensembl-mcp-smoke --live --client-timeout 120
@@ -218,6 +247,7 @@ src/ensembl_mcp/
   models.py                   Typed inputs, genome metadata and results
   graphql.py                  Async HTTP/GraphQL handling and safe errors
   lookup.py                   Queries, reference selection and lookup service
+discovery.py                Search Hub and metadata contracts, REST handling and services
   server.py                   FastMCP registration, lifecycle and transport entry point
   smoke.py                    Explicit live MCP smoke command
 tests/                        Offline unit and protocol tests
@@ -234,7 +264,7 @@ The pilot assesses three aspects separately: **protocol behaviour**, **service p
 
 ## Current limitations
 
-Only symbol lookup in the dynamically resolved reference genome is included. There is no common-name resolution, fuzzy/custom alias search, caller-selected assembly/release, separate stable-ID lookup, or additional data tool. Returning upstream `alternative_symbols` does not establish alias-search behaviour. Upstream schema compatibility and current biological data require live verification.
+Gene retrieval remains symbol-based. Genome discovery supports broader names and assemblies, and callers can pass a selected UUID into `find_gene`. There is no separate stable-ID gene lookup or gene-alias search. FTP release selection is unsupported upstream; no latest-integrated guarantee is made. Returning upstream `alternative_symbols` does not establish alias-search behaviour. Upstream schema compatibility and current biological data require live verification.
 
 Transcripts, proteins, sequences, variants, coordinates, external references and literature retrieval are outside v0.1. So are Kubernetes resources, deployment, public hosting, caching, retries and a broad observability stack. The reported development deployment is in `mcp-poc-public`; image rollout and verification of this HTTP update are separate from the application changes here.
 

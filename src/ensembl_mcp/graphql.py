@@ -31,6 +31,8 @@ class CoreGraphQLClient:
         variables: dict,
         field: str,
         model: type[T],
+        *,
+        single: bool = False,
     ) -> list[T]:
         start = perf_counter()
         category = "internal_error"
@@ -56,10 +58,11 @@ class CoreGraphQLClient:
                     # Fail even if partial data is present; never expose raw upstream messages.
                     raise LookupError("upstream_graphql", "The service could not complete the query.")
             data = payload.get("data")
-            if not isinstance(data, dict) or not isinstance(data.get(field), list):
+            if not isinstance(data, dict) or not isinstance(data.get(field), dict if single else list):
                 raise LookupError("upstream_response", "The service returned missing or invalid data.")
             try:
-                result = TypeAdapter(list[model]).validate_python(data[field], strict=True)
+                values = [data[field]] if single else data[field]
+                result = TypeAdapter(list[model]).validate_python(values, strict=True)
             except ValidationError:
                 raise LookupError("upstream_response", "The service returned invalid result fields.") from None
             category = "success"
@@ -81,3 +84,6 @@ class CoreGraphQLClient:
                 "graphql operation=%s elapsed_seconds=%.3f outcome=%s http_status=%s",
                 operation, perf_counter() - start, category, status,
             )
+
+    async def query_object(self, operation: str, query: str, variables: dict, field: str, model: type[T]) -> T:
+        return (await self.query_list(operation, query, variables, field, model, single=True))[0]

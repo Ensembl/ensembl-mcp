@@ -26,15 +26,15 @@ async def test_discovery_call_and_lifecycle(genome, brca2, caplog):
         return httpx.Response(200, json={"data": {field: [genome if field == "genomes" else brca2]}})
 
     transport = TrackingTransport(handler)
-    server = create_server(Settings("http://private-cluster.invalid:8000"), transport=transport)
+    server = create_server(Settings("http://private-cluster.invalid:8000", search_url="https://search.invalid/genomes/v3"), transport=transport)
     caplog.set_level(logging.INFO, logger="ensembl_mcp")
     async with Client(server) as client:
         tools = await client.list_tools()
-        assert [tool.name for tool in tools] == ["find_gene"]
+        assert {tool.name for tool in tools} == {"find_gene", "find_genomes", "explain_genome", "get_genome_download_links"}
         schema = tools[0].input_schema
-        assert set(schema["required"]) == {"symbol", "species"}
-        assert set(schema["properties"]) == {"symbol", "species"}
-        assert all(prop["type"] == "string" for prop in schema["properties"].values())
+        assert set(schema["required"]) == {"symbol"}
+        assert set(schema["properties"]) == {"symbol", "species", "genome_id"}
+        assert schema["properties"]["symbol"]["type"] == "string"
         assert tools[0].output_schema is not None
         for _ in range(2):
             result = await client.call_tool("find_gene", {"symbol": " BRCA2 ", "species": " Homo sapiens "})
@@ -61,7 +61,7 @@ async def test_invalid_protocol_inputs_make_no_request(arguments):
     def handler(request):
         pytest.fail("Invalid inputs must not reach the backend")
 
-    async with Client(create_server(Settings("http://example.invalid"), transport=httpx.MockTransport(handler))) as client:
+    async with Client(create_server(Settings("http://example.invalid", search_url="https://search.invalid/genomes/v3"), transport=httpx.MockTransport(handler))) as client:
         result = await client.call_tool("find_gene", arguments, raise_on_error=False)
     assert result.is_error
     assert result.structured_content is None
@@ -71,7 +71,7 @@ async def test_caller_errors_are_safe_and_cleanup_runs():
     transport = TrackingTransport(lambda request: httpx.Response(200, json={
         "errors": [{"message": "secret trace from http://private-cluster.invalid:8000"}],
     }))
-    async with Client(create_server(Settings("http://example.invalid"), transport=transport)) as client:
+    async with Client(create_server(Settings("http://example.invalid", search_url="https://search.invalid/genomes/v3"), transport=transport)) as client:
         result = await client.call_tool("find_gene", {"symbol": "BRCA2", "species": "Homo sapiens"}, raise_on_error=False)
     assert result.is_error
     text = " ".join(block.text for block in result.content)
@@ -82,7 +82,7 @@ async def test_caller_errors_are_safe_and_cleanup_runs():
 
 async def test_protocol_not_found_retains_genome(genome):
     transport = httpx.MockTransport(lambda request: httpx.Response(200, json={"data": {"genomes": [genome], "genes": []}}))
-    async with Client(create_server(Settings("http://example.invalid"), transport=transport)) as client:
+    async with Client(create_server(Settings("http://example.invalid", search_url="https://search.invalid/genomes/v3"), transport=transport)) as client:
         result = await client.call_tool("find_gene", {"symbol": "ABSENT", "species": "Homo sapiens"})
     assert result.structured_content["outcome"] == "not_found"
     assert result.structured_content["genes"] == []
