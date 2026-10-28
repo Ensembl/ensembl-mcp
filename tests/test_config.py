@@ -14,7 +14,7 @@ from ensembl_mcp.config import ConfigurationError, Settings
     "http://host/\npath",
 ])
 def test_invalid_endpoint(endpoint):
-    env = {} if endpoint is None else {"ENSEMBL_CORE_GRAPHQL_URL": endpoint}
+    env = {} if endpoint is None else {"ENSEMBL_GENOME_SEARCH_URL": "https://search.invalid/genomes/v3", "ENSEMBL_CORE_GRAPHQL_URL": endpoint}
     with pytest.raises(ConfigurationError, match="ENSEMBL_CORE_GRAPHQL_URL") as exc:
         Settings.from_env(env)
     assert "secret" not in str(exc.value)
@@ -24,13 +24,13 @@ def test_invalid_endpoint(endpoint):
 def test_invalid_timeout(timeout):
     with pytest.raises(ConfigurationError, match="TIMEOUT_SECONDS"):
         Settings.from_env({
-            "ENSEMBL_CORE_GRAPHQL_URL": "https://example.invalid/graphql",
+            "ENSEMBL_GENOME_SEARCH_URL": "https://search.invalid/genomes/v3", "ENSEMBL_CORE_GRAPHQL_URL": "https://example.invalid/graphql",
             "ENSEMBL_CORE_GRAPHQL_TIMEOUT_SECONDS": timeout,
         })
 
 
 def test_configuration_defaults_and_overrides():
-    config = Settings.from_env({"ENSEMBL_CORE_GRAPHQL_URL": " https://example.invalid/graphql "})
+    config = Settings.from_env({"ENSEMBL_GENOME_SEARCH_URL": "https://search.invalid/genomes/v3", "ENSEMBL_CORE_GRAPHQL_URL": " https://example.invalid/graphql "})
     assert config.endpoint == "https://example.invalid/graphql"
     assert config.mcp_transport == "stdio"
     assert config.mcp_port == 8000
@@ -39,7 +39,7 @@ def test_configuration_defaults_and_overrides():
     assert config.http_timeout.write == 30
     assert config.http_timeout.pool == 30
     custom = Settings.from_env({
-        "ENSEMBL_CORE_GRAPHQL_URL": "http://localhost:8000",
+        "ENSEMBL_GENOME_SEARCH_URL": "https://search.invalid/genomes/v3", "ENSEMBL_CORE_GRAPHQL_URL": "http://localhost:8000",
         "ENSEMBL_CORE_GRAPHQL_TIMEOUT_SECONDS": "45.5",
     })
     assert custom.http_timeout.read == custom.http_timeout.write == custom.http_timeout.pool == 45.5
@@ -49,20 +49,20 @@ def test_configuration_defaults_and_overrides():
 @pytest.mark.parametrize("port", ["", "abc", "0", "-1", "65536", "8000.5", "inf"])
 def test_invalid_mcp_port(port):
     with pytest.raises(ConfigurationError, match="MCP_PORT"):
-        Settings.from_env({"ENSEMBL_CORE_GRAPHQL_URL": "http://example.invalid", "MCP_PORT": port})
+        Settings.from_env({"ENSEMBL_GENOME_SEARCH_URL": "https://search.invalid/genomes/v3", "ENSEMBL_CORE_GRAPHQL_URL": "http://example.invalid", "MCP_PORT": port})
 
 
 @pytest.mark.parametrize("transport", ["", "http", "sse", "unknown"])
 def test_invalid_mcp_transport(transport):
     with pytest.raises(ConfigurationError, match="MCP_TRANSPORT"):
         Settings.from_env({
-            "ENSEMBL_CORE_GRAPHQL_URL": "http://example.invalid", "MCP_TRANSPORT": transport,
+            "ENSEMBL_GENOME_SEARCH_URL": "https://search.invalid/genomes/v3", "ENSEMBL_CORE_GRAPHQL_URL": "http://example.invalid", "MCP_TRANSPORT": transport,
         })
 
 
 def test_http_configuration():
     settings = Settings.from_env({
-        "ENSEMBL_CORE_GRAPHQL_URL": "http://example.invalid",
+        "ENSEMBL_GENOME_SEARCH_URL": "https://search.invalid/genomes/v3", "ENSEMBL_CORE_GRAPHQL_URL": "http://example.invalid",
         "MCP_TRANSPORT": "streamable-http", "MCP_PORT": "8080",
     })
     assert settings.mcp_transport == "streamable-http"
@@ -78,4 +78,37 @@ def test_startup_configuration_error_is_stderr_only():
     assert result.returncode == 2
     assert result.stdout == ""
     assert "ENSEMBL_CORE_GRAPHQL_URL is required" in result.stderr
+    assert "Traceback" not in result.stderr
+
+
+@pytest.mark.parametrize("value", [None, "", "   ", "not-a-url", "ftp://host/path", "http://host:bad", "https://user:secret@host", "https://host/?q=x"])
+def test_search_url_is_required_and_validated(value):
+    env = {"ENSEMBL_CORE_GRAPHQL_URL": "https://core.invalid"}
+    if value is not None:
+        env["ENSEMBL_GENOME_SEARCH_URL"] = value
+    with pytest.raises(ConfigurationError, match="ENSEMBL_GENOME_SEARCH_URL") as error:
+        Settings.from_env(env)
+    assert "secret" not in str(error.value)
+
+
+def test_search_url_has_no_constructor_default():
+    with pytest.raises(TypeError, match="search_url"):
+        Settings("https://core.invalid")
+    settings = Settings.from_env({
+        "ENSEMBL_CORE_GRAPHQL_URL": "https://core.invalid",
+        "ENSEMBL_GENOME_SEARCH_URL": " https://search.invalid/genomes/v3 ",
+    })
+    assert settings.search_url == "https://search.invalid/genomes/v3"
+
+
+def test_missing_search_url_stops_startup():
+    env = {key: value for key, value in os.environ.items() if key != "ENSEMBL_GENOME_SEARCH_URL"}
+    env["ENSEMBL_CORE_GRAPHQL_URL"] = "https://core.invalid"
+    result = subprocess.run(
+        [sys.executable, "-m", "ensembl_mcp.server"], env=env,
+        capture_output=True, text=True, timeout=15,
+    )
+    assert result.returncode == 2
+    assert result.stdout == ""
+    assert "ENSEMBL_GENOME_SEARCH_URL is required" in result.stderr
     assert "Traceback" not in result.stderr

@@ -3,7 +3,7 @@
 import math
 import os
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from urllib.parse import urlsplit
 
 import httpx
@@ -19,6 +19,8 @@ class Settings:
     timeout_seconds: float = 30.0
     mcp_transport: str = "stdio"
     mcp_port: int = 8000
+    search_url: str = field(kw_only=True)
+    metadata_url: str | None = None
 
     def __post_init__(self) -> None:
         if self.mcp_transport not in {"stdio", "streamable-http"}:
@@ -48,6 +50,23 @@ class Settings:
             raise ConfigurationError(
                 "ENSEMBL_CORE_GRAPHQL_TIMEOUT_SECONDS must be a finite positive number."
             )
+        for name, value in (("ENSEMBL_GENOME_SEARCH_URL", self.search_url), ("ENSEMBL_METADATA_API_URL", self.metadata_url)):
+            if value is None and name == "ENSEMBL_METADATA_API_URL":
+                continue
+            try:
+                url = urlsplit(value)
+                valid = (
+                    url.scheme in {"http", "https"} and bool(url.hostname)
+                    and url.username is None and url.password is None
+                    and not url.fragment and not url.query
+                    and not any(c.isspace() or ord(c) < 32 for c in value)
+                    and (url.port is None or 0 < url.port <= 65535)
+                    and bool(httpx.URL(value).host)
+                )
+            except (TypeError, ValueError, httpx.InvalidURL):
+                valid = False
+            if not valid:
+                raise ConfigurationError(f"{name} must be an absolute HTTP(S) URL without credentials, query or fragment.")
 
     @classmethod
     def from_env(cls, env: Mapping[str, str] | None = None) -> "Settings":
@@ -55,6 +74,9 @@ class Settings:
         endpoint = env.get("ENSEMBL_CORE_GRAPHQL_URL", "").strip()
         if not endpoint:
             raise ConfigurationError("ENSEMBL_CORE_GRAPHQL_URL is required.")
+        search_url = env.get("ENSEMBL_GENOME_SEARCH_URL", "").strip()
+        if not search_url:
+            raise ConfigurationError("ENSEMBL_GENOME_SEARCH_URL is required.")
         try:
             timeout = float(env.get("ENSEMBL_CORE_GRAPHQL_TIMEOUT_SECONDS", "30"))
         except ValueError:
@@ -69,6 +91,8 @@ class Settings:
             endpoint, timeout,
             mcp_transport=env.get("MCP_TRANSPORT", "stdio").strip(),
             mcp_port=port,
+            search_url=search_url,
+            metadata_url=env.get("ENSEMBL_METADATA_API_URL", "").strip() or None,
         )
 
     @property

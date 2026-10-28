@@ -50,7 +50,7 @@ async def test_http_initialize_list_and_call(genome, brca2, outcome):
             await super().aclose()
 
     server = server_module.create_server(
-        Settings("http://private-backend.invalid"), transport=Backend(handler),
+        Settings("http://private-backend.invalid", search_url="https://search.invalid/genomes/v3"), transport=Backend(handler),
     )
     app = server.http_app(path="/mcp", transport="streamable-http", stateless_http=True)
     # ASGITransport deliberately does not run lifespan; run it explicitly so the
@@ -77,8 +77,8 @@ async def test_http_initialize_list_and_call(genome, brca2, outcome):
             listed = rpc_result(await client.post("/mcp", json={
                 "jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {},
             }))
-            assert [tool["name"] for tool in listed["tools"]] == ["find_gene"]
-            assert set(listed["tools"][0]["inputSchema"]["required"]) == {"symbol", "species"}
+            assert {tool["name"] for tool in listed["tools"]} == {"find_gene", "find_genomes", "explain_genome", "get_genome_download_links"}
+            assert set(listed["tools"][0]["inputSchema"]["required"]) == {"symbol"}
             assert requests == []
             called = rpc_result(await client.post("/mcp", json={
                 "jsonrpc": "2.0", "id": 3, "method": "tools/call",
@@ -112,6 +112,7 @@ async def test_http_initialize_list_and_call(genome, brca2, outcome):
 @pytest.mark.parametrize("transport,port", [("stdio", "8000"), ("streamable-http", "8000"), ("streamable-http", "8087")])
 def test_entry_point_transport_and_binding(monkeypatch, transport, port):
     monkeypatch.setenv("ENSEMBL_CORE_GRAPHQL_URL", "http://example.invalid")
+    monkeypatch.setenv("ENSEMBL_GENOME_SEARCH_URL", "https://search.invalid/genomes/v3")
     monkeypatch.setenv("MCP_TRANSPORT", transport)
     monkeypatch.setenv("MCP_PORT", port)
     server = Mock()
@@ -127,7 +128,7 @@ async def test_fastmcp_client_over_http(genome, brca2):
     backend = httpx.MockTransport(lambda request: httpx.Response(200, json={
         "data": {"genomes": [genome], "genes": [brca2]},
     }))
-    server = server_module.create_server(Settings("http://example.invalid"), transport=backend)
+    server = server_module.create_server(Settings("http://example.invalid", search_url="https://search.invalid/genomes/v3"), transport=backend)
     app = server.http_app(path="/mcp", transport="streamable-http", stateless_http=True)
 
     def client_factory(**kwargs):

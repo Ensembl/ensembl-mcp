@@ -39,7 +39,7 @@ async def test_smoke_over_stdio_with_mocked_backend(tmp_path, genome, brca2, mon
         return StdioTransport(**{**kwargs, "args": [str(script)]})
 
     monkeypatch.setattr(smoke, "StdioTransport", mock_backend_transport)
-    result = await smoke.run_live(Settings("http://example.invalid"), client_timeout=10)
+    result = await smoke.run_live(Settings("http://example.invalid", search_url="https://search.invalid/genomes/v3"), client_timeout=10)
     assert result.genome.genome_id == genome["genome_id"]
     assert result.genes[0].model_dump() == brca2
 

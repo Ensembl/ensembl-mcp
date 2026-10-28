@@ -30,6 +30,18 @@ query FindGenesBySymbol($by_symbol: SymbolInput!) {
 }
 """
 
+GENOME_QUERY = """
+query GetGenome($by_genome_id: GenomeIDInput!) {
+  genome(by_genome_id: $by_genome_id) {
+    genome_id
+    scientific_name
+    assembly_accession
+    release_number
+    is_reference
+  }
+}
+"""
+
 
 def select_reference_genome(genomes: list[Genome]) -> Genome:
     if not genomes:
@@ -59,12 +71,22 @@ class EnsemblLookup:
             {"by_symbol": {"symbol": symbol, "genome_id": genome_id}}, "genes", Gene,
         )
 
-    async def find_gene(self, symbol: str, species: str) -> FindGeneResult:
+    async def find_gene(self, symbol: str, species: str | None = None, genome_id: str | None = None) -> FindGeneResult:
         try:
-            inputs = FindGeneInput(symbol=symbol, species=species)
+            inputs = FindGeneInput(symbol=symbol, species=species, genome_id=genome_id)
         except ValidationError:
-            raise LookupError("input_validation", "symbol and species must be non-blank strings.") from None
-        genome = await self.resolve_reference_genome(inputs.species)
+            raise LookupError("input_validation", "Provide a non-blank symbol and species or a genome UUID.") from None
+        if inputs.genome_id is not None:
+            genome = await self.client.query_object(
+                "GetGenome", GENOME_QUERY,
+                {"by_genome_id": {"genome_id": inputs.genome_id}}, "genome", Genome,
+            )
+            if genome.genome_id != inputs.genome_id:
+                raise LookupError("upstream_response", "The service returned a different genome UUID.")
+            if inputs.species is not None and genome.scientific_name.casefold() != inputs.species.casefold():
+                raise LookupError("input_validation", "species does not match the supplied genome UUID.")
+        else:
+            genome = await self.resolve_reference_genome(inputs.species)
         genes = await self.find_genes_by_symbol(inputs.symbol, genome.genome_id)
         return FindGeneResult(
             symbol=inputs.symbol, species=inputs.species, genome=genome,
