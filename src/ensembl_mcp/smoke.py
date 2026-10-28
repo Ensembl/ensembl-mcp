@@ -16,7 +16,7 @@ async def check_server(client: Client) -> FindGeneResult:
     """Validate discovery and an MCP invocation without historical data pins."""
     tools = await client.list_tools()
     tool = next((tool for tool in tools if tool.name == "find_gene"), None)
-    if tool is None or set(tool.input_schema.get("required", [])) != {"symbol", "species"}:
+    if tool is None or set(tool.input_schema.get("required", [])) != {"symbol"} or not {"species", "genome_id"} <= set(tool.input_schema.get("properties", {})):
         raise ValueError("find_gene is missing or its required inputs differ from the contract")
     result = await client.call_tool("find_gene", {"symbol": "BRCA2", "species": "Homo sapiens"})
     parsed = FindGeneResult.model_validate(result.structured_content, strict=True)
@@ -40,6 +40,7 @@ async def run_live(settings: Settings, client_timeout: float) -> FindGeneResult:
             # This check owns a stdio subprocess, including when run in the HTTP image.
             "MCP_TRANSPORT": "stdio",
             "ENSEMBL_CORE_GRAPHQL_URL": settings.endpoint,
+            "ENSEMBL_GENOME_SEARCH_URL": settings.search_url,
             "ENSEMBL_CORE_GRAPHQL_TIMEOUT_SECONDS": str(settings.timeout_seconds),
         },
         keep_alive=False,
