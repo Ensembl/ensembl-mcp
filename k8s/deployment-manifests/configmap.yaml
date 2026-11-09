@@ -6,3 +6,4 @@ data:
   ENSEMBL_GENOME_SEARCH_URL: "http://metadata-api-svc.ensembl-dev:8014"
   ENSEMBL_CORE_GRAPHQL_URL: "http://graphql-core-svc.ensembl-dev:8000"
   ENSEMBL_CORE_GRAPHQL_TIMEOUT_SECONDS: "30"
+  ENSEMBL_TRACKS_API_URL: "http://ensembl-track-api-svc.ensembl-dev:8012"
