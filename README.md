@@ -6,7 +6,7 @@ This pilot supports the development and evaluation of the [EMBL-EBI MCP guidelin
 
 ## Status and purpose
 
-The pilot exposes four read-only tools using Python and the `fastmcp` package:
+The pilot exposes seven read-only tools using Python and the `fastmcp` package, including an MCP App for the Ensembl genome browser:
 
 ```text
 find_genomes(query="human", reference_only=True)
@@ -14,13 +14,16 @@ find_gene(symbol="BRCA2", species="Homo sapiens")
 find_gene(symbol="BRCA2", genome_id="<UUID returned by find_genomes>")
 explain_genome(id_or_accession="GCA_000001405.29")
 get_genome_download_links(genome_id="<selected genome UUID>")
+show_genome_browser(genome_id="<selected supported genome UUID>", gene_id="<gene stable ID>")
+demo_genome_browser()
+get_browser_gene(genome_id="<selection genome UUID>", gene_id="<selected gene stable ID>")
 ```
 
 For `find_gene`, `symbol` is required, along with either `species` or `genome_id`. Surrounding whitespace is removed and blank values are rejected before any upstream request. Symbol case is preserved. `species` must be a scientific name. A supplied genome UUID skips species resolution and permits non-reference genomes. If both selectors are supplied, the scientific name must match the UUID’s genome (case-insensitively).
 
 Without a UUID, `find_gene` resolves the species reference genome through Ensembl Core GraphQL. With a UUID, it fetches that genome’s context directly and uses exactly that UUID for the gene query. Both paths return all symbol matches. No tool automatically substitutes a newer genome UUID.
 
-This is early development, not a production service. Offline unit and MCP protocol tests use mocked upstream responses. Prior manual requests established the query examples and cluster connectivity; they did **not** demonstrate this MCP implementation against the real service. Live verification requires the separate smoke command below and a reachable endpoint. The initial image has been deployed to the development cluster in `mcp-poc-public`, as reported by the deployment team. The application now supports Streamable HTTP for that environment; this transport update still needs image build and cluster verification. Kubernetes manifests are not changed here.
+This is early development, not a production service. Offline tests use mocked upstream responses. On 9 November 2026, the browser tools were also checked against live development services, and real tracks were rendered in a local Chrome sandbox. These checks do **not** establish rendering or conversation behaviour in ChatGPT desktop. See [MCP Apps validation](docs/MCP_APPS_VALIDATION.md) for evidence and outstanding acceptance checks. The initial server has previously been deployed in `mcp-poc-public`; this implementation does not deploy the updated image or change Kubernetes manifests.
 
 ## Install and run locally
 
@@ -28,6 +31,7 @@ The supported runtime for v0.1 is **Python 3.12** with **FastMCP 4.0.11**, pinne
 
 ```sh
 python3.12 -m venv .venv
+(cd frontend && npm ci && npm run build)
 .venv/bin/python -m pip install -e '.[test]'
 export ENSEMBL_CORE_GRAPHQL_URL='https://your-reachable-core-graphql-endpoint/graphql'
 export ENSEMBL_GENOME_SEARCH_URL='https://your-reachable-genome-search-endpoint/api/search/genomes/v3'
@@ -54,17 +58,64 @@ This listens on **`0.0.0.0:8000`** and exposes **`/mcp`**. Connect locally using
 | `ENSEMBL_METADATA_API_URL` | Metadata API base URL, including its API prefix (for example `https://your-host/api/metadata`). No default; metadata tools report a configuration error when omitted. |
 | `ENSEMBL_CORE_GRAPHQL_URL` | Required absolute `http://` or `https://` URL with a host. Surrounding whitespace is trimmed. Credentials in the URL, fragments, internal whitespace and invalid ports are rejected. There is no runtime default or fallback. |
 | `ENSEMBL_CORE_GRAPHQL_TIMEOUT_SECONDS` | Optional finite positive number, default `30`. Used for HTTPX read, write and connection-pool timeouts. Connection timeout is separately fixed at `5` seconds. |
+| `ENSEMBL_TRACKS_API_URL` | Tracks API base URL. No default. Browser tools report `tracks_not_configured` when absent; existing tools remain available. |
+| `ENSEMBL_BROWSER_BACKEND_URL` | Absolute HTTPS browser data base URL, **without** `/hi` or `/lo`. Default `https://mcp-poc-public.review.ensembl.org/api/browser/data`. |
+| `ENSEMBL_BROWSER_WEBSITE_URL` | HTTPS website base for context-preserving links. Default `https://mcp-poc-public.review.ensembl.org`. Must support the same genome and release. |
+| `ENSEMBL_BROWSER_GENOME_IDS` | Comma-separated canonical UUID allowlist for the configured browser backend. Default `59871324-7803-4234-856e-2a2bd96d7b3c`. Expand only after checking data compatibility. No automatic genome substitution. |
 
 Invalid configured URLs or missing required Core or Search Hub configuration stop startup with an error on stderr and exit status 2. Search and metadata URL overrides must not contain credentials, query strings, fragments, or whitespace. All upstream clients share the configured HTTP timeout. Configure all three services against compatible environments/releases; a public Search Hub endpoint may not match development Thoas data. Keep credentials and deployment secrets outside the repository.
 
-The historically tested **cluster-only** configuration is:
+The observed **cluster-only** Core GraphQL configuration is:
 
 ```sh
 export ENSEMBL_CORE_GRAPHQL_URL='http://graphql-core-svc.ensembl-dev:8000'
-export ENSEMBL_GENOME_SEARCH_URL='http://metadata-api-svc.ensembl-dev:8014'
 ```
 
-That ClusterIP service is in `ensembl-dev`; connectivity from a pod in `mcp-poc-public` was previously reported as successful. This hostname is not a public endpoint. Running locally requires a reachable endpoint or an existing approved access route. The server is not deployed by these instructions.
+That ClusterIP service is in `ensembl-dev`; connectivity from a pod in `mcp-poc-public` was previously reported as successful. The checked-in ConfigMap sets `ENSEMBL_GENOME_SEARCH_URL` to `http://metadata-api-svc.ensembl-dev:8014`, but this client sends its search GET directly to the configured URL and expects Search Hub's `matches`/`meta` response. A service base URL is not established as a compatible search endpoint. Verify its complete path and schema before relying on `find_genomes`; do not silently redirect discovery to a different dataset. The ConfigMap also omits `ENSEMBL_METADATA_API_URL` and `ENSEMBL_TRACKS_API_URL`. Configure metadata separately, and verify `http://ensembl-track-api-svc.ensembl-dev:8012/track_categories/<UUID>` from the MCP pod before using that Tracks API base. The server is not deployed by these instructions.
+
+## Genome browser MCP App
+
+The UI uses the [MCP Apps resource and bridge protocol](https://modelcontextprotocol.io/extensions/apps/overview), supported by the [ChatGPT UI integration](https://developers.openai.com/plugins/build/chatgpt-ui). `show_genome_browser` and the temporary `demo_genome_browser` diagnostic declare `_meta.ui.resourceUri = ui://ensembl/genome-browser/v1.html`. Resource reads return `text/html;profile=mcp-app`, with a CSP connection allowlist derived from the configured browser backend origin.
+
+Build with Node 22+ and npm. The lockfile pins the MCP Apps SDK and renderer (`@ensembl/ensembl-genome-browser` **0.6.14**, from Ensembl's public GitLab npm registry). The generated HTML includes JavaScript, CSS and gzip-compressed WebAssembly. At about 2.27 MiB it needs no CDN, asset ingress route or same-origin `/api` assumption. The host must permit WebAssembly compilation, WebGL and `DecompressionStream`; failures are reported in the view. Resource size limits and actual ChatGPT sandbox policy still need desktop verification.
+
+```sh
+(cd frontend && npm ci && npm run build)
+.venv/bin/python -m pip wheel . --no-deps --wheel-dir dist
+```
+
+Build before creating wheels/sdists. The wheel build fails explicitly if the UI is missing. Docker performs the frontend build in a Node stage, copies the result into the Python package and preserves the existing non-root `/mcp` service. Generated assets and `node_modules` are not committed. Frontend source changes require rebuilding the HTML and the package/image. Change the versioned resource URI when releasing a host-cached incompatible UI revision.
+
+For a local process reaching the existing development ingress, add:
+
+```sh
+export ENSEMBL_TRACKS_API_URL='https://mcp-poc-public.review.ensembl.org/api/tracks'
+```
+
+Keep the normal Core GraphQL and Search Hub configuration. Core lookups and catalogue requests run **server-side**. Only high-frequency binary track data goes from the renderer to `.../api/browser/data/hi` and `/lo`; both existing HTTPS routes are required. Fetches to those routes explicitly use `credentials: "omit"` and CORS mode. Do not add cookies or authentication to these wildcard-CORS requests. The Tracks API's missing CORS response is irrelevant to the app because the browser never fetches its catalogue directly.
+
+### Browser contract and supported pilot
+
+`show_genome_browser(genome_id, gene_id=None, region=None, start=None, end=None)` requires exactly one of a gene stable ID or a complete interval. Coordinates are **1-based inclusive** throughout; the website's `setBrowserLocation` adapter passes this convention to `GenomeBrowser.goto` without subtracting one. The server checks region length and rejects incompatible genome UUIDs, gene versions, returned region names and out-of-bounds intervals. Missing catalogues, invalid catalogues and missing supported tracks are errors rather than empty successes.
+
+Only the explicitly configured human genome is enabled by default: UUID `59871324-7803-4234-856e-2a2bd96d7b3c`, assembly `GCA_000001405.29`, Core release `2.0` as observed on 9 November. Those assembly/release values are retrieved on each call, never substituted from this documentation. Gene and reference-sequence tracks are supported. Track identifiers come from the server-fetched catalogue; renderer 0.6.14 uses `['track', 'expand', track_id]`, matching the website. The catalogue's legacy `trigger` paths are retained as metadata but are not passed to this renderer. Regulation, variants, private tracks and uploads are outside this pilot.
+
+`structuredContent` contains a versioned `BrowserView`: genome/assembly/release, exact gene ID when requested, validated location, initial supported tracks, browser backend URL and website URL. The catalogue is sent in `_meta['ensembl/trackCatalogue']` for the component only. Model-visible text includes the coordinates and an Ensembl link and does not claim that rendering succeeded. Ordinary MCP clients can use those results without displaying HTML.
+
+The UI provides pan/zoom, gene-symbol or stable-ID navigation, track toggles, loading/failure/empty-search states, and a larger-view request when offered by the host. Ambiguous gene matches require an explicit choice. Gene/transcript clicks send exact selected identifiers, genome, assembly, release and viewport to the model; continuous motion and pointer hover stay local. **Explain this selection** requests an explanation that first retrieves `get_browser_gene` for the selected gene. This narrow tool provides Core annotation and location, not experimental evidence of function or causality.
+
+New browser-tool results update a view when delivered to it; unrelated annotation results do not replace it. A host can instead create a separate view. Reopening and Reset restore the last tool-declared state for that instance; transient pan, track toggles and clicks are not persisted across reopening.
+
+### Connect and demonstrate
+
+Build and run the HTTP service, then add its reachable HTTPS `/mcp` endpoint as a development app in an authorised ChatGPT developer-mode workspace. Refresh the app's tool definitions after updating the server. Follow the current [ChatGPT integration documentation](https://developers.openai.com/plugins/build/chatgpt-ui) for host setup; this repository does not install a connector or expose localhost automatically.
+
+1. Call `demo_genome_browser` first: human `17:63,992,802-64,038,237` checks the known interval independently of gene lookup.
+2. Ask: “Find BRCA2 in genome `59871324-7803-4234-856e-2a2bd96d7b3c` and show it in the genome browser.” Check the returned genome and all gene matches before selecting one. Live MCP lookup returned `ENSG00000139618.19` on 9 November, despite the separately reported website-search failure.
+3. Pan, zoom, switch a gene track off/on, then select another gene and choose **Explain this selection**. Check the follow-up tool uses that exact genome and stable ID.
+4. Open the Ensembl link, try larger view, reopen the widget, and record whether follow-up browser results update it or open another widget.
+
+The broader “Show human BRCA2” journey depends on a correctly configured discovery endpoint. A broken Search Hub configuration must be fixed in deployment before claiming that journey works. The website's zero-result BRCA2 search is still a separate unresolved diagnostic, not evidence that the gene is absent.
 
 ### MCP client connection
 
@@ -209,8 +260,19 @@ All tools publish typed output schemas and read-only annotations. HTTP failures,
 Default offline suite (no Kubernetes access or live requests):
 
 ```sh
+(cd frontend && npm ci && npm run build && npm test && npm run test:browser)
 .venv/bin/python -m pytest -q
 ```
+
+Browser tests use local Chrome (`channel: chrome`) and a loopback MCP Apps test host. Three interaction tests use a mock renderer and six TypeScript tests check bounds, selection context, track commands and credential policy. Real renderer tests are skipped unless explicitly enabled:
+
+```sh
+# With reachable Core GraphQL, Search Hub and Tracks settings already exported:
+.venv/bin/python scripts/browser_live_fixture.py --live
+(cd frontend && MCP_BROWSER_LIVE=1 npm run test:browser -- tests/live.spec.ts)
+```
+
+The live fixture command calls this implementation's `find_gene`, both browser tools and `get_browser_gene`. It does not exercise Search Hub. The resulting `.live-fixtures` are local test evidence, not shipped data. Live browser checks contact both priority routes and save screenshots/network summaries in `frontend/test-results`. They test a local sandbox, **not ChatGPT desktop**. Do not treat these as final desktop acceptance.
 
 The suite covers dynamic reference selection, historical and synthetic fixtures, multiple/nullable gene matches, input validation, GraphQL variables, configuration, upstream failure handling, sanitised errors, request logs and lifecycle cleanup. Protocol tests discover and invoke the tool through FastMCP; a subprocess test also checks stdio with a mocked HTTP backend. HTTP tests send MCP initialise, initialised notification, tool discovery and tool invocation requests through the SDK ASGI application at `/mcp`, checking structured successes, no-match results, sanitised failures and lifecycle cleanup. A FastMCP client also exercises the HTTP transport against that ASGI app. The tests check startup transport, host and port selection as well. These HTTP tests run without opening network sockets; they do not verify a deployed listener or Kubernetes routing. Tests block accidental TCP connections in the test process.
 

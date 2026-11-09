@@ -33,6 +33,7 @@ class CoreGraphQLClient:
         model: type[T],
         *,
         single: bool = False,
+        not_found_message: str | None = None,
     ) -> list[T]:
         start = perf_counter()
         category = "internal_error"
@@ -58,6 +59,8 @@ class CoreGraphQLClient:
                     # Fail even if partial data is present; never expose raw upstream messages.
                     raise LookupError("upstream_graphql", "The service could not complete the query.")
             data = payload.get("data")
+            if single and not_found_message and isinstance(data, dict) and field in data and data[field] is None:
+                raise LookupError("not_found", not_found_message)
             if not isinstance(data, dict) or not isinstance(data.get(field), dict if single else list):
                 raise LookupError("upstream_response", "The service returned missing or invalid data.")
             try:
@@ -85,5 +88,5 @@ class CoreGraphQLClient:
                 operation, perf_counter() - start, category, status,
             )
 
-    async def query_object(self, operation: str, query: str, variables: dict, field: str, model: type[T]) -> T:
-        return (await self.query_list(operation, query, variables, field, model, single=True))[0]
+    async def query_object(self, operation: str, query: str, variables: dict, field: str, model: type[T], *, not_found_message: str | None = None) -> T:
+        return (await self.query_list(operation, query, variables, field, model, single=True, not_found_message=not_found_message))[0]

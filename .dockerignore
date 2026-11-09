@@ -1,10 +1,18 @@
 # Only send package sources and build metadata to the Docker daemon.
 **
 !pyproject.toml
+!setup.py
 !README.md
 !LICENSE
 !src/
 !src/ensembl_mcp/
 !src/ensembl_mcp/**
+!frontend/
+!frontend/**
+frontend/node_modules/
+frontend/test-results/
+frontend/playwright-report/
+frontend/.live-fixtures/
+src/ensembl_mcp/ui/
 **/__pycache__/
 **/*.py[cod]

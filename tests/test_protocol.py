@@ -30,7 +30,7 @@ async def test_discovery_call_and_lifecycle(genome, brca2, caplog):
     caplog.set_level(logging.INFO, logger="ensembl_mcp")
     async with Client(server) as client:
         tools = await client.list_tools()
-        assert {tool.name for tool in tools} == {"find_gene", "find_genomes", "explain_genome", "get_genome_download_links"}
+        assert {tool.name for tool in tools} == {"find_gene", "find_genomes", "explain_genome", "get_genome_download_links", "show_genome_browser", "demo_genome_browser", "get_browser_gene"}
         schema = tools[0].input_schema
         assert set(schema["required"]) == {"symbol"}
         assert set(schema["properties"]) == {"symbol", "species", "genome_id"}

@@ -216,3 +216,9 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+# MCP App build outputs (built before Python packaging and inside Docker)
+frontend/node_modules/
+frontend/test-results/
+frontend/playwright-report/
+frontend/.live-fixtures/
+src/ensembl_mcp/ui/

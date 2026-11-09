@@ -1,0 +1,21 @@
+{
+  "name": "ensembl-mcp-browser",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc --noEmit && node build.mjs",
+    "test": "vitest run",
+    "test:browser": "playwright test"
+  },
+  "dependencies": {
+    "@ensembl/ensembl-genome-browser": "0.6.14",
+    "@modelcontextprotocol/ext-apps": "2.0.4"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.58.2",
+    "esbuild": "0.25.12",
+    "typescript": "5.9.3",
+    "vitest": "3.2.4"
+  }
+}
