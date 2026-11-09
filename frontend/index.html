@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Ensembl genome browser</title>
+  <style>
+    :root { color-scheme: light dark; font: 14px/1.5 system-ui, sans-serif; color: #163445; background: #fff; }
+    * { box-sizing: border-box; } body { margin: 0; } main { padding: 18px; }
+    header { display: flex; justify-content: space-between; align-items: start; gap: 12px; }
+    h1 { margin: 0; font-size: 20px; letter-spacing: -.3px; } p { margin: 5px 0; }
+    .eyebrow { font-size: 11px; letter-spacing: .1em; color: #257284; text-transform: uppercase; font-weight: 700; }
+    #identity, .hint { color: #576b76; font-size: 12px; overflow-wrap: anywhere; }
+    #location { font-variant-numeric: tabular-nums; font-size: 17px; font-weight: 600; }
+    button, input, select { font: inherit; border: 1px solid #b7c9ce; border-radius: 6px; padding: 7px 10px; background: #fff; color: #163445; }
+    button { cursor: pointer; } button:hover { background: #edf6f7; } button:disabled { opacity: .45; cursor: default; }
+    button:focus-visible, input:focus-visible, a:focus-visible { outline: 2px solid #12869b; outline-offset: 3px; }
+    a { color: #156d83; } .controls, #gene-form, #tracks { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 12px 0; }
+    input { flex: 1; min-width: 140px; } #matches { width: 100%; margin-bottom: 8px; }
+    #tracks label { font-size: 12px; padding-right: 8px; } #tracks input { min-width: 0; }
+    #status { padding: 8px 10px; background: #edf5f7; border-radius: 6px; }
+    #status[data-error="true"] { background: #fff1ec; color: #8e341b; }
+    #browser { height: 380px; position: relative; overflow: hidden; background: white; border: 1px solid #d5e2e5; border-radius: 6px; margin-top: 12px; }
+    body.fullscreen #browser { height: calc(100vh - 350px); min-height: 380px; }
+    #selection-panel { padding-top: 12px; display: flex; gap: 12px; align-items: center; justify-content: space-between; }
+    #explain { background: #146e83; color: white; border-color: #146e83; }
+    [hidden] { display: none !important; }
+    @media (max-width: 440px) { main { padding: 12px; } header { flex-wrap: wrap; } #selection-panel { align-items: start; flex-direction: column; } }
+    @media (prefers-color-scheme: dark) {
+      :root { background: #142630; color: #e5eef2; } button, input, select { background: #213944; color: #e5eef2; }
+      #identity, .hint { color: #b1c8d2; } a, .eyebrow { color: #81d1e2; } #status { background: #213944; }
+      button:hover { background: #2d4b59; }
+    }
+  </style>
+</head>
+<body><main>
+  <header><div><div class="eyebrow">Ensembl · Genome browser</div><h1 id="title">Explore a genomic region</h1></div><button id="expand" hidden>Larger view</button></header>
+  <p id="identity">Waiting for the selected genome</p><p id="location"></p>
+  <div id="gene-form" role="search"><label for="gene-input">Go to gene</label><input id="gene-input" placeholder="Gene symbol or stable ID" autocomplete="off"><button id="search" type="button" disabled>Find</button></div>
+  <select id="matches" aria-label="Choose a gene match" hidden></select>
+  <div class="controls" aria-label="Browser navigation">
+    <button id="left" disabled aria-label="Pan left">←</button><button id="right" disabled aria-label="Pan right">→</button>
+    <button id="zoom-in" disabled>Zoom in</button><button id="zoom-out" disabled>Zoom out</button>
+    <button id="reset" disabled>Reset view</button><a id="external" target="_blank" rel="noopener noreferrer" hidden>Open in Ensembl ↗</a>
+  </div>
+  <div id="tracks" aria-label="Visible tracks"></div>
+  <p id="status" role="status" aria-live="polite">Connecting to the conversation…</p>
+  <div id="browser" aria-label="Interactive genome browser"></div>
+  <div id="selection-panel"><span id="selection">Select a gene in the browser to discuss it.</span><button id="explain" disabled>Explain this selection</button></div>
+  <p class="hint">Coordinates are 1-based and inclusive. Drag to pan; zoom to see sequence. Reopening restores the tool's declared view.</p>
+  <!-- APP_SCRIPT -->
+</main></body></html>

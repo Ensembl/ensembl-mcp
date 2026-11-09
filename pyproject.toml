@@ -25,6 +25,9 @@ ensembl-mcp-smoke = "ensembl_mcp.smoke:main"
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+ensembl_mcp = ["ui/*.html"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"

@@ -77,7 +77,7 @@ async def test_http_initialize_list_and_call(genome, brca2, outcome):
             listed = rpc_result(await client.post("/mcp", json={
                 "jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {},
             }))
-            assert {tool["name"] for tool in listed["tools"]} == {"find_gene", "find_genomes", "explain_genome", "get_genome_download_links"}
+            assert {tool["name"] for tool in listed["tools"]} == {"find_gene", "find_genomes", "explain_genome", "get_genome_download_links", "show_genome_browser", "demo_genome_browser", "get_browser_gene"}
             assert set(listed["tools"][0]["inputSchema"]["required"]) == {"symbol"}
             assert requests == []
             called = rpc_result(await client.post("/mcp", json={

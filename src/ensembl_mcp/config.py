@@ -21,6 +21,10 @@ class Settings:
     mcp_port: int = 8000
     search_url: str = field(kw_only=True)
     metadata_url: str | None = None
+    tracks_url: str | None = None
+    browser_backend_url: str = "https://mcp-poc-public.review.ensembl.org/api/browser/data"
+    browser_website_url: str = "https://mcp-poc-public.review.ensembl.org"
+    browser_genome_ids: tuple[str, ...] = ("59871324-7803-4234-856e-2a2bd96d7b3c",)
 
     def __post_init__(self) -> None:
         if self.mcp_transport not in {"stdio", "streamable-http"}:
@@ -50,8 +54,14 @@ class Settings:
             raise ConfigurationError(
                 "ENSEMBL_CORE_GRAPHQL_TIMEOUT_SECONDS must be a finite positive number."
             )
-        for name, value in (("ENSEMBL_GENOME_SEARCH_URL", self.search_url), ("ENSEMBL_METADATA_API_URL", self.metadata_url)):
-            if value is None and name == "ENSEMBL_METADATA_API_URL":
+        for name, value in (
+            ("ENSEMBL_GENOME_SEARCH_URL", self.search_url),
+            ("ENSEMBL_METADATA_API_URL", self.metadata_url),
+            ("ENSEMBL_TRACKS_API_URL", self.tracks_url),
+            ("ENSEMBL_BROWSER_BACKEND_URL", self.browser_backend_url),
+            ("ENSEMBL_BROWSER_WEBSITE_URL", self.browser_website_url),
+        ):
+            if value is None and name in {"ENSEMBL_METADATA_API_URL", "ENSEMBL_TRACKS_API_URL"}:
                 continue
             try:
                 url = urlsplit(value)
@@ -67,6 +77,19 @@ class Settings:
                 valid = False
             if not valid:
                 raise ConfigurationError(f"{name} must be an absolute HTTP(S) URL without credentials, query or fragment.")
+            if name.startswith("ENSEMBL_BROWSER_") and url.scheme != "https":
+                raise ConfigurationError(f"{name} must use HTTPS for the sandboxed app.")
+        if self.browser_backend_url.rstrip("/").endswith(("/hi", "/lo")):
+            raise ConfigurationError("ENSEMBL_BROWSER_BACKEND_URL must omit the hi/lo priority suffix.")
+        from uuid import UUID
+        try:
+            if not self.browser_genome_ids:
+                raise ValueError
+            for genome_id in self.browser_genome_ids:
+                if str(UUID(genome_id)) != genome_id:
+                    raise ValueError
+        except (ValueError, TypeError, AttributeError):
+            raise ConfigurationError("ENSEMBL_BROWSER_GENOME_IDS must contain comma-separated canonical genome UUIDs.") from None
 
     @classmethod
     def from_env(cls, env: Mapping[str, str] | None = None) -> "Settings":
@@ -93,6 +116,12 @@ class Settings:
             mcp_port=port,
             search_url=search_url,
             metadata_url=env.get("ENSEMBL_METADATA_API_URL", "").strip() or None,
+            tracks_url=env.get("ENSEMBL_TRACKS_API_URL", "").strip() or None,
+            browser_backend_url=env.get("ENSEMBL_BROWSER_BACKEND_URL", cls.browser_backend_url).strip(),
+            browser_website_url=env.get("ENSEMBL_BROWSER_WEBSITE_URL", cls.browser_website_url).strip(),
+            browser_genome_ids=tuple(value.strip() for value in env.get(
+                "ENSEMBL_BROWSER_GENOME_IDS", ",".join(cls.browser_genome_ids)
+            ).split(",")),
         )
 
     @property
