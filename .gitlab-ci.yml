@@ -1,14 +1,21 @@
-# include template to setup review app
-include: '/gitlab-ci-templates/.deploy-template.yml'
+# include template from Ensembl Gitlab CI templates project
+include:
+  - project: 'ensembl-web/ensembl-gitlab-ci-templates'
+    ref: 'main'
+    file:
+      - 'branch-rules/.branch-rules-template.yaml'
+      - 'deploy/.deploy-main-template.yaml'
+      - 'security-scan/.ensembl-security-jobs.yaml'
 
 stages:
+  - security-scan
   - build
+  - container-scan
   - deploy
 
 variables:
   DOCKER_IMAGE: ${CI_REGISTRY_IMAGE}:${CI_COMMIT_SHORT_SHA}
   DOCKER_TLS_CERTDIR: ""
-  MCP_NS: "mcp-poc-public" # explicitlyhard-coded for POC
 
 #Build docker image
 Docker:
