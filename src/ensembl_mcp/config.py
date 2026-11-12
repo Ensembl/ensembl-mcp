@@ -19,6 +19,14 @@ class Settings:
     timeout_seconds: float = 30.0
     mcp_transport: str = "stdio"
     mcp_port: int = 8000
+    allowed_hosts: tuple[str, ...] = ("localhost", "127.0.0.1", "[::1]")
+    allowed_origins: tuple[str, ...] = ()
+    max_concurrent_requests: int = 16
+    requests_per_minute: int = 120
+    max_request_bytes: int = 65_536
+    request_timeout_seconds: float = 30.0
+    max_concurrent_tools: int = 8
+    tool_timeout_seconds: float = 20.0
     search_url: str = field(kw_only=True)
     metadata_url: str | None = None
     tracks_url: str | None = None
@@ -31,6 +39,38 @@ class Settings:
             raise ConfigurationError("MCP_TRANSPORT must be stdio or streamable-http.")
         if type(self.mcp_port) is not int or not 1 <= self.mcp_port <= 65535:
             raise ConfigurationError("MCP_PORT must be an integer between 1 and 65535.")
+        for name in ("max_concurrent_requests", "requests_per_minute", "max_request_bytes", "max_concurrent_tools"):
+            value = getattr(self, name)
+            if type(value) is not int or value <= 0:
+                raise ConfigurationError(f"MCP_{name.upper()} must be a positive integer.")
+        for name in ("request_timeout_seconds", "tool_timeout_seconds"):
+            value = getattr(self, name)
+            if not math.isfinite(value) or value <= 0:
+                raise ConfigurationError(f"MCP_{name.upper()} must be finite and positive.")
+        if not self.allowed_hosts:
+            raise ConfigurationError("MCP_ALLOWED_HOSTS must contain explicit hostnames.")
+        for host in self.allowed_hosts:
+            try:
+                parsed = urlsplit("//" + host)
+                valid = (parsed.hostname and parsed.netloc == host and parsed.port is None
+                         and not parsed.username and not parsed.password and "*" not in host
+                         and not any(c.isspace() or ord(c) < 32 for c in host))
+            except ValueError:
+                valid = False
+            if not valid:
+                raise ConfigurationError("MCP_ALLOWED_HOSTS must contain hostnames without ports, wildcards or URLs.")
+        for origin in self.allowed_origins:
+            try:
+                parsed = urlsplit(origin)
+                valid = (parsed.scheme in {"http", "https"} and parsed.hostname
+                         and origin == f"{parsed.scheme}://{parsed.netloc}"
+                         and not parsed.username and not parsed.password and "*" not in origin
+                         and (parsed.port is None or 0 < parsed.port <= 65535)
+                         and not any(c.isspace() or ord(c) < 32 for c in origin))
+            except ValueError:
+                valid = False
+            if not valid:
+                raise ConfigurationError("MCP_ALLOWED_ORIGINS must contain exact HTTP(S) origins without paths or wildcards.")
         try:
             url = urlsplit(self.endpoint)
             valid = (
@@ -110,10 +150,25 @@ class Settings:
             port = int(env.get("MCP_PORT", "8000"))
         except ValueError:
             raise ConfigurationError("MCP_PORT must be an integer between 1 and 65535.") from None
+        limits = {}
+        for name in ("max_concurrent_requests", "requests_per_minute", "max_request_bytes",
+                     "max_concurrent_tools", "request_timeout_seconds", "tool_timeout_seconds"):
+            try:
+                convert = float if name.endswith("seconds") else int
+                limits[name] = convert(env.get(f"MCP_{name.upper()}", str(getattr(cls, name))))
+            except ValueError:
+                raise ConfigurationError(f"MCP_{name.upper()} must be a valid positive number.") from None
         return cls(
             endpoint, timeout,
             mcp_transport=env.get("MCP_TRANSPORT", "stdio").strip(),
             mcp_port=port,
+            allowed_hosts=tuple(value.strip().lower() for value in env.get(
+                "MCP_ALLOWED_HOSTS", ",".join(cls.allowed_hosts)
+            ).split(",")),
+            allowed_origins=tuple(value.strip() for value in env.get(
+                "MCP_ALLOWED_ORIGINS", ""
+            ).split(",") if value.strip()),
+            **limits,
             search_url=search_url,
             metadata_url=env.get("ENSEMBL_METADATA_API_URL", "").strip() or None,
             tracks_url=env.get("ENSEMBL_TRACKS_API_URL", "").strip() or None,

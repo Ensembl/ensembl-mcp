@@ -10,7 +10,7 @@ readme = "README.md"
 requires-python = ">=3.12,<3.13"
 license = "Apache-2.0"
 dependencies = [
-    "fastmcp==4.0.11",
+    "fastmcp==4.1.2",
     "httpx==0.28.1",
     "pydantic>=2.11,<3",
 ]
@@ -31,3 +31,4 @@ ensembl_mcp = ["ui/*.html"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"

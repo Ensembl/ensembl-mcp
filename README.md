@@ -23,20 +23,22 @@ For `find_gene`, `symbol` is required, along with either `species` or `genome_id
 
 Without a UUID, `find_gene` resolves the species reference genome through Ensembl Core GraphQL. With a UUID, it fetches that genome’s context directly and uses exactly that UUID for the gene query. Both paths return all symbol matches. No tool automatically substitutes a newer genome UUID.
 
-This is early development, not a production service. Offline tests use mocked upstream responses. On 9 November 2026, the browser tools were also checked against live development services, and real tracks were rendered in a local Chrome sandbox. These checks do **not** establish rendering or conversation behaviour in ChatGPT desktop. See [MCP Apps validation](docs/MCP_APPS_VALIDATION.md) for evidence and outstanding acceptance checks. The initial server has previously been deployed in `mcp-poc-public`; this implementation does not deploy the updated image or change Kubernetes manifests.
+This is early development, not a production service. Offline tests use mocked upstream responses. On 9 November 2026, the browser tools were also checked against live development services, and real tracks were rendered in a local Chrome sandbox. These checks do **not** establish rendering or conversation behaviour in ChatGPT desktop. The initial server has previously been deployed in `mcp-poc-public`; this implementation does not deploy the updated image or change Kubernetes manifests.
 
 ## Install and run locally
 
-The supported runtime for v0.1 is **Python 3.12** with **FastMCP 4.0.11**, pinned in `pyproject.toml`. HTTP calls use HTTPX 0.28.1. From the repository root:
+The supported runtime for v0.1 is **Python 3.12** with **FastMCP 4.1.2**, pinned in `pyproject.toml`. HTTP calls use HTTPX 0.28.1. From the repository root:
 
 ```sh
-python3.12 -m venv .venv
+python3.12 -m pip install uv==0.13.7
+uv sync --frozen --extra test
 (cd frontend && npm ci && npm run build)
-.venv/bin/python -m pip install -e '.[test]'
 export ENSEMBL_CORE_GRAPHQL_URL='https://your-reachable-core-graphql-endpoint/graphql'
 export ENSEMBL_GENOME_SEARCH_URL='https://your-reachable-genome-search-endpoint/api/search/genomes/v3'
 MCP_TRANSPORT=stdio .venv/bin/ensembl-mcp
 ```
+
+After changing Python dependencies, run `uv lock` and `uv export --frozen --no-dev --no-emit-project --no-header --format requirements-txt --output-file requirements.lock`, then commit both lockfiles. Docker installs the hash-checked runtime export.
 
 Replace the example URL with your actual Core GraphQL endpoint. Local execution defaults to **stdio** and waits for MCP messages; an MCP client normally starts the process itself. The equivalent module entry point is `.venv/bin/python -m ensembl_mcp.server`. Configuration is read from the process environment; `.env` files are not automatically loaded.
 
@@ -48,12 +50,24 @@ MCP_TRANSPORT=streamable-http MCP_PORT=8000 .venv/bin/ensembl-mcp
 
 This listens on **`0.0.0.0:8000`** and exposes **`/mcp`**. Connect locally using `http://localhost:8000/mcp`. The existing FastMCP package and its MCP Python SDK implement [Streamable HTTP](https://gofastmcp.com/deployment/running-server#http-transport-streamable); this is not the legacy SSE transport. HTTP requests are stateless, so they do not require a pod-specific MCP session. The server supports `initialize`, `notifications/initialized`, `tools/list` and `tools/call` through this endpoint, including SDK-managed response streaming.
 
+HTTP now permits only loopback Host names by default and rejects every supplied Origin unless explicitly allowed. For a public host, set `MCP_ALLOWED_HOSTS` and any required `MCP_ALLOWED_ORIGINS`. Request size, rate, concurrency and total-operation limits are enabled.
+
+The proxy must preserve the original Host header. Forwarding headers are not trusted, and these limits apply per process; configure shared quotas at the ingress when using multiple replicas. Host/Origin checks do not provide authentication or enable CORS.
+
 ### Configuration
 
 | Variable | Requirement and default |
 | --- | --- |
 | `MCP_TRANSPORT` | `stdio` or `streamable-http` only. Defaults to `stdio` when unset locally; the Docker image sets `streamable-http`. Surrounding whitespace is trimmed. |
 | `MCP_PORT` | Integer from `1` to `65535`, default `8000`. Validated at startup; used only for HTTP. The HTTP bind address is fixed at `0.0.0.0` and the endpoint path at `/mcp`. |
+| `MCP_ALLOWED_HOSTS` | Comma-separated hostnames without schemes or ports. Defaults to `localhost,127.0.0.1,[::1]`; set the actual public hostname for remote HTTP access. Wildcards are rejected. |
+| `MCP_ALLOWED_ORIGINS` | Comma-separated exact HTTP(S) origins, including any port and without a trailing slash. Defaults to empty: requests with an Origin header are denied. Native clients normally omit Origin. |
+| `MCP_REQUESTS_PER_MINUTE` | Process-wide token bucket, default `120`; burst capacity equals this number. |
+| `MCP_MAX_CONCURRENT_REQUESTS` | Maximum active HTTP requests, default `16`; overload is rejected without queueing. |
+| `MCP_MAX_REQUEST_BYTES` | Maximum actual request-body size before JSON parsing, default `65536` bytes, including chunked requests. |
+| `MCP_REQUEST_TIMEOUT_SECONDS` | Total HTTP request lifetime, including body upload and streaming, default `30` seconds. |
+| `MCP_MAX_CONCURRENT_TOOLS` | Maximum active tool calls across HTTP and stdio, default `8`. |
+| `MCP_TOOL_TIMEOUT_SECONDS` | Total tool execution deadline across all upstream calls, default `20` seconds. |
 | `ENSEMBL_GENOME_SEARCH_URL` | Required full Search Hub search URL. No default or fallback. Missing, blank, or invalid values stop startup. |
 | `ENSEMBL_METADATA_API_URL` | Metadata API base URL, including its API prefix (for example `https://your-host/api/metadata`). No default; metadata tools report a configuration error when omitted. |
 | `ENSEMBL_CORE_GRAPHQL_URL` | Required absolute `http://` or `https://` URL with a host. Surrounding whitespace is trimmed. Credentials in the URL, fragments, internal whitespace and invalid ports are rejected. There is no runtime default or fallback. |
@@ -159,7 +173,7 @@ The editable install makes the module available without a client-specific workin
 Build the image and run the HTTP server with runtime configuration:
 
 ```sh
-docker build -t ensembl-mcp:0.1 .
+docker build --pull -t ensembl-mcp:0.1 .
 export ENSEMBL_CORE_GRAPHQL_URL='https://your-reachable-core-graphql-endpoint/graphql'
 export ENSEMBL_GENOME_SEARCH_URL='https://your-reachable-genome-search-endpoint/api/search/genomes/v3'
 docker run --rm -p 8000:8000 \
@@ -175,7 +189,11 @@ docker run --rm -p 8080:8080 \
   ensembl-mcp:0.1
 ```
 
-The image uses the [official Python 3.12 slim image](https://hub.docker.com/_/python), installs the package without test dependencies and runs as a non-root user. The `.dockerignore` allowlist excludes local environments, secrets, Git history and tests from the build context. The endpoint is supplied at runtime, never baked into the image. `EXPOSE 8000` documents the default port; it does not publish the port or configure Kubernetes networking.
+The image uses the [official Python 3.12 Alpine image](https://hub.docker.com/_/python), installs the package without test dependencies and runs as a non-root user. The `.dockerignore` allowlist excludes local environments, secrets, Git history and tests from the build context. The endpoint is supplied at runtime, never baked into the image. `EXPOSE 8000` documents the default port; it does not publish the port or configure Kubernetes networking.
+
+The runtime builds checksum-verified SQLite 3.54.1 in a separate stage and installs it as a local APK, replacing the older library supplied by Alpine 3.24. Review the pinned SQLite version and checksum when updating dependencies; retire this custom package once the supported base supplies a verified fixed version. Compilers remain outside the final image, and runtime package installers and SUID/SGID bits are removed. Rebuild the image to update dependencies.
+
+Run deployments with a read-only root filesystem, dropped Linux capabilities, no privilege escalation and UID 10001. `scripts/check_container.py` checks this security context, SQLite FTS5, MCP tool discovery and the packaged browser resource without network access.
 
 To explicitly use stdio in the container instead:
 
@@ -245,7 +263,7 @@ Inputs also include `reference_only=False`, `page=1`, `per_page=20` (maximum 100
 
 Results contain `meta` (`total_hits`, `page`, `per_page`), `matches`, `reference_only`, and `next_page` (null at the end). Each match contains the UUID, names, species and organism taxonomy IDs, assembly, reference status, release, annotation provider/method, and coding-gene count. Optional genome tags and strain/type metadata are preserved when present.
 
-Reference filtering happens across the complete upstream candidate set, preserving upstream order and retaining multiple references. Totals, pagination, and `next_page` then refer to reference matches only. This requires scanning search pages, so broad searches can make many upstream calls. Searches exceeding 10000 candidates fail with `search_too_broad`; narrow them using the exact species selector or a more specific query. Changed totals, duplicate genomes, malformed records, and inconsistent pages fail rather than producing misleading partial results. The index does not provide snapshot isolation: a change that preserves the total and introduces no duplicates may not be detected.
+Reference filtering happens across the complete upstream candidate set, preserving upstream order and retaining multiple references. Totals, pagination, and `next_page` then refer to reference matches only. This requires scanning search pages, so broad searches can make many upstream calls. Searches exceeding 1000 candidates fail with `search_too_broad`; narrow them using the exact species selector or a more specific query. Changed totals, duplicate genomes, malformed records, and inconsistent pages fail rather than producing misleading partial results. The index does not provide snapshot isolation: a change that preserves the total and introduces no duplicates may not be detected.
 
 `explain_genome(id_or_accession)` calls `/genome/{id_or_accession}/explain`. It returns the requested identifier, the resolved genome (including suppression details), and a separate `newer_genome` only if upstream reports a different, non-suppressed genome. `newer_genome_status` is `available`, `suppressed`, or `not_reported`. Absence of a reported replacement is not proof that none exists. UUID inputs must be preserved exactly; accession inputs resolve according to the metadata API’s public accession mapping. `/genomeid` is not exposed.
 

@@ -57,6 +57,27 @@ async def test_reference_filter_uses_all_pages_with_filtered_total():
     assert all("reference_only" not in r.url.params for r in requests)
 
 
+@pytest.mark.parametrize("total,expected_requests", [(1000, 10), (1001, 1)])
+async def test_reference_search_work_is_bounded(total, expected_requests):
+    requests = []
+    def handler(request):
+        requests.append(request)
+        page = int(request.url.params["page"])
+        offset = (page - 1) * 100
+        matches = [candidate(str(UUID(int=i + 1))) for i in range(offset, min(total, offset + 100))]
+        return httpx.Response(200, json={"meta": {"total_hits": total, "page": page, "per_page": 100},
+                                        "matches": matches})
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
+        service = GenomeServices(http, SEARCH, METADATA)
+        if total > 1000:
+            with pytest.raises(LookupError, match="search_too_broad"):
+                await service.find_genomes(query="human", reference_only=True, per_page=1)
+        else:
+            result = await service.find_genomes(query="human", reference_only=True, per_page=1)
+            assert len(result.matches) == 1 and result.meta.total_hits == 1000
+    assert len(requests) == expected_requests
+
+
 async def test_reference_filter_retains_multiple_references_and_empty_pages():
     def handler(request):
         return httpx.Response(200, json={"meta": {"total_hits": 2, "page": 1, "per_page": 100},
@@ -214,7 +235,14 @@ async def test_missing_metadata_configuration_is_explicit():
 
 
 @pytest.mark.parametrize("variable", ["ENSEMBL_GENOME_SEARCH_URL", "ENSEMBL_METADATA_API_URL"])
-@pytest.mark.parametrize("value", ["ftp://host", "https://user:secret@host", "http://host/?q=1", "https://host/#x", "http://host:0", "http://bad host"])
+@pytest.mark.parametrize("value", [
+    'ftp://host',
+    'https://user:secret@host',  # gitleaks:allow -- deliberate rejected URL fixture
+    'http://host/?q=1',
+    'https://host/#x',
+    'http://host:0',
+    'http://bad host',
+])
 def test_rest_configuration_rejects_unsafe_urls(variable, value):
     with pytest.raises(ConfigurationError, match=variable):
         Settings.from_env({"ENSEMBL_CORE_GRAPHQL_URL": "https://core.invalid", "ENSEMBL_GENOME_SEARCH_URL": SEARCH, variable: value})
@@ -271,7 +299,12 @@ async def test_untrustworthy_metadata_is_an_error(changes):
             await GenomeServices(http, SEARCH, METADATA).explain_genome(GENOME_ID)
 
 
-@pytest.mark.parametrize("url", ["https://user:secret@host/path", "javascript:alert(1)", "http://host:bad", "http://has space/path"])
+@pytest.mark.parametrize("url", [
+    'https://user:secret@host/path',  # gitleaks:allow -- deliberate rejected URL fixture
+    'javascript:alert(1)',
+    'http://host:bad',
+    'http://has space/path',
+])
 async def test_download_links_reject_invalid_urls(url):
     def handler(request):
         return httpx.Response(200, json=summary() if request.url.path.endswith("explain") else [{"dataset": "genebuild", "url": url}])

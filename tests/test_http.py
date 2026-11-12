@@ -2,7 +2,7 @@
 
 import asyncio
 import json
-from unittest.mock import Mock
+from unittest.mock import ANY, Mock
 
 import httpx
 import httpx2
@@ -52,7 +52,8 @@ async def test_http_initialize_list_and_call(genome, brca2, outcome):
     server = server_module.create_server(
         Settings("http://private-backend.invalid", search_url="https://search.invalid/genomes/v3"), transport=Backend(handler),
     )
-    app = server.http_app(path="/mcp", transport="streamable-http", stateless_http=True)
+    app = server.http_app(transport="streamable-http", **server_module.http_options(
+        Settings("https://core.invalid", search_url="https://search.invalid")))
     # ASGITransport deliberately does not run lifespan; run it explicitly so the
     # SDK session manager and shared upstream client match the deployed lifecycle.
     async with app.router.lifespan_context(app):
@@ -121,7 +122,12 @@ def test_entry_point_transport_and_binding(monkeypatch, transport, port):
     expected = {"transport": transport, "show_banner": False}
     if transport == "streamable-http":
         expected.update(host="0.0.0.0", port=int(port), path="/mcp", stateless_http=True)
+        expected.update(host_origin_protection=True, allowed_hosts=["localhost", "127.0.0.1", "[::1]"],
+                        allowed_origins=[], middleware=ANY,
+                        uvicorn_config={"proxy_headers": False, "limit_concurrency": 24})
     server.run.assert_called_once_with(**expected)
+    if transport == "streamable-http":
+        assert server.run.call_args.kwargs["middleware"][0].cls is server_module.HTTPProtection
 
 
 async def test_fastmcp_client_over_http(genome, brca2):
@@ -129,7 +135,8 @@ async def test_fastmcp_client_over_http(genome, brca2):
         "data": {"genomes": [genome], "genes": [brca2]},
     }))
     server = server_module.create_server(Settings("http://example.invalid", search_url="https://search.invalid/genomes/v3"), transport=backend)
-    app = server.http_app(path="/mcp", transport="streamable-http", stateless_http=True)
+    app = server.http_app(transport="streamable-http", **server_module.http_options(
+        Settings("https://core.invalid", search_url="https://search.invalid")))
 
     def client_factory(**kwargs):
         # FastMCP 4's MCP client uses httpx2; the application backend uses HTTPX.

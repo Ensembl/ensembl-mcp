@@ -192,7 +192,7 @@ async def test_app_wire_contract_over_existing_mcp_http_path(browser_setup, geno
 
 
 @pytest.mark.parametrize("name,value", [
-    ("ENSEMBL_TRACKS_API_URL", "https://user:secret@example.com"),
+    ("ENSEMBL_TRACKS_API_URL", "https://user:secret@example.com"),  # gitleaks:allow -- deliberate rejected URL fixture
     ("ENSEMBL_BROWSER_BACKEND_URL", "http://example.com/data"),
     ("ENSEMBL_BROWSER_BACKEND_URL", "https://example.com/data/hi"),
     ("ENSEMBL_BROWSER_WEBSITE_URL", "javascript:alert(1)"),

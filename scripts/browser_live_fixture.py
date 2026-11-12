@@ -31,7 +31,8 @@ async def run(output: Path):
             (output / f"live-{locus}.json").write_text(json.dumps(payload), encoding="utf-8")
             print(f"{locus}: live tool result passed; genome={result.structured_content['genome']['genome_id']}")
         details = await client.call_tool("get_browser_gene", {"genome_id": DEMO_GENOME, "gene_id": genes[0]["stable_id"]})
-        assert details.structured_content["gene"]["symbol"] == "BRCA2"
+        if details.structured_content["gene"]["symbol"] != "BRCA2":
+            raise RuntimeError("Selected-gene annotation did not identify BRCA2")
         print("Selected-gene annotation retrieval passed")
 
 

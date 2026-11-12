@@ -1,6 +1,7 @@
 # Only send package sources and build metadata to the Docker daemon.
 **
 !pyproject.toml
+!requirements.lock
 !setup.py
 !README.md
 !LICENSE

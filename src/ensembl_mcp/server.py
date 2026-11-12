@@ -12,6 +12,7 @@ from fastmcp import Context, FastMCP
 from fastmcp.exceptions import ToolError
 from fastmcp.apps import AppConfig, ResourceCSP
 from fastmcp.tools import ToolResult
+from starlette.middleware import Middleware
 
 from .config import ConfigurationError, Settings
 from .graphql import CoreGraphQLClient, LookupError
@@ -19,6 +20,7 @@ from .lookup import EnsemblLookup
 from .models import FindGeneResult
 from .discovery import GenomeServices, FindGenomesResult, ExplainGenomeResult, DownloadLinksResult
 from .browser import BrowserService, BrowserView, GeneDetails, UI_URI, DEMO_GENOME
+from .security import HTTPProtection, ToolLimits
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +43,7 @@ def create_server(
     server = FastMCP(
         "Ensembl MCP", lifespan=lifespan, mask_error_details=True,
         strict_input_validation=True,
+        middleware=[ToolLimits(settings)],
     )
 
     @server.tool(annotations={"readOnlyHint": True, "destructiveHint": False})
@@ -83,7 +86,7 @@ def create_server(
         Search may match multiple species or assemblies; do not automatically choose
         the first hit. reference_only excludes is_reference=false, retaining all
         reference matches. Pages are 1-based with 1-100 results; filtered totals and
-        pages count reference genomes only. Reference filtering scans at most 10000
+        pages count reference genomes only. Reference filtering scans at most 1000
         candidates; narrow larger searches. release is a Search Hub release label,
         not a Thoas numeric release; omission uses Search Hub's current/partial policy.
         """
@@ -203,6 +206,17 @@ def create_server(
     return server
 
 
+def http_options(settings: Settings) -> dict:
+    """Shared production/test policy; never trust client forwarding headers."""
+    return {
+        "path": "/mcp", "stateless_http": True,
+        "host_origin_protection": True,
+        "allowed_hosts": list(settings.allowed_hosts),
+        "allowed_origins": list(settings.allowed_origins),
+        "middleware": [Middleware(HTTPProtection, settings=settings)],
+    }
+
+
 def main() -> None:
     logging.basicConfig(level=logging.INFO, stream=sys.stderr, format="%(levelname)s %(name)s %(message)s")
     # HTTPX's INFO request logs include the configured URL; use our safe diagnostics.
@@ -215,9 +229,12 @@ def main() -> None:
         raise SystemExit(2) from None
     server = create_server(settings)
     if settings.mcp_transport == "streamable-http":
+        # Container bind is intentional; the explicit Host/Origin policy applies
+        # even on non-loopback addresses, and forwarding headers are untrusted.
         server.run(
-            transport="streamable-http", host="0.0.0.0", port=settings.mcp_port,
-            path="/mcp", stateless_http=True, show_banner=False,
+            transport="streamable-http", host="0.0.0.0", port=settings.mcp_port,  # nosec B104
+            **http_options(settings), show_banner=False,
+            uvicorn_config={"proxy_headers": False, "limit_concurrency": settings.max_concurrent_requests + 8},
         )
     else:
         server.run(transport="stdio", show_banner=False)

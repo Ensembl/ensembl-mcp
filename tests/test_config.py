@@ -10,7 +10,8 @@ from ensembl_mcp.config import ConfigurationError, Settings
 @pytest.mark.parametrize("endpoint", [
     None, "", "   ", "not-a-url", "ftp://host/path", "http:///path",
     "http://host:bad", "http://host:65536", "http://host:0", "http://[bad",
-    "https://user:secret@host", "http://host/#fragment", "http://has space/",
+    "https://user:secret@host",  # gitleaks:allow -- deliberate rejected URL fixture
+    "http://host/#fragment", "http://has space/",
     "http://host/\npath",
 ])
 def test_invalid_endpoint(endpoint):
@@ -81,7 +82,16 @@ def test_startup_configuration_error_is_stderr_only():
     assert "Traceback" not in result.stderr
 
 
-@pytest.mark.parametrize("value", [None, "", "   ", "not-a-url", "ftp://host/path", "http://host:bad", "https://user:secret@host", "https://host/?q=x"])
+@pytest.mark.parametrize("value", [
+    None,
+    '',
+    '   ',
+    'not-a-url',
+    'ftp://host/path',
+    'http://host:bad',
+    'https://user:secret@host',  # gitleaks:allow -- deliberate rejected URL fixture
+    'https://host/?q=x',
+])
 def test_search_url_is_required_and_validated(value):
     env = {"ENSEMBL_CORE_GRAPHQL_URL": "https://core.invalid"}
     if value is not None:

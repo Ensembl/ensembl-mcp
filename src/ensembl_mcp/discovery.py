@@ -132,7 +132,7 @@ class DownloadLinksResult(UpstreamModel):
 class GenomeServices:
     # Reference filtering needs the complete candidate set for correct totals/pages.
     # Fail explicitly rather than silently return an incomplete filtered result.
-    MAX_REFERENCE_CANDIDATES = 10_000
+    MAX_REFERENCE_CANDIDATES = 1_000
 
     def __init__(self, http: httpx.AsyncClient, search_url: str, metadata_url: str | None):
         self.http = http
@@ -188,7 +188,7 @@ class GenomeServices:
             first = await self.search_page(params)
             total = first.meta.total_hits
             if total > self.MAX_REFERENCE_CANDIDATES:
-                raise LookupError("search_too_broad", "Narrow the query before filtering reference genomes (more than 10000 candidates).")
+                raise LookupError("search_too_broad", "Narrow the query before filtering reference genomes (more than 1000 candidates).")
             candidates = first.matches[:]
             for page in range(2, (total + 99) // 100 + 1):
                 params["page"] = page
